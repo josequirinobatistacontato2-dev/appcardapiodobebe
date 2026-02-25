@@ -1521,15 +1521,12 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       try {
         const id = p.id || `prod-${Date.now()}`; 
         const { error } = await supabase.from('products').upsert({ id, data: { ...p, id } }, { onConflict: 'id' });
-        if (error) {
-          const { error: error2 } = await supabase.from('products').upsert({ id, value: { ...p, id } }, { onConflict: 'id' });
-          if (error2) throw error2;
-        }
+        if (error) throw error;
         await loadData(); 
         notify('Produto salvo com sucesso!', 'success'); 
       } catch (err: any) {
         console.error('Error saving product:', err);
-        notify(`Erro ao salvar produto: ${err.message}`, 'error');
+        notify(`Erro ao salvar: Verifique se a coluna 'data' existe na tabela 'products'`, 'error');
       }
     },
     deleteProduct: async (id: string) => { 
@@ -1547,15 +1544,12 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       try {
         const updated = { ...c, expiryDate: calculateExpiryDate(c.startDate, c.accessType) };
         const { error } = await supabase.from('clients').upsert({ id: c.email, data: updated }, { onConflict: 'id' }); 
-        if (error) {
-          const { error: error2 } = await supabase.from('clients').upsert({ id: c.email, value: updated }, { onConflict: 'id' });
-          if (error2) throw error2;
-        }
+        if (error) throw error;
         await loadData(); 
         notify('Cliente salvo!', 'success'); 
       } catch (err: any) {
         console.error('Error saving client:', err);
-        notify(`Erro ao salvar cliente: ${err.message}`, 'error');
+        notify(`Erro ao salvar: Verifique se a coluna 'data' existe na tabela 'clients'`, 'error');
       }
     },
     deleteClient: async (id: string) => { 
@@ -1620,15 +1614,12 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       try {
         const id = n.id || `notice-${Date.now()}`; 
         const { error } = await supabase.from('notices').upsert({ id, data: { ...n, id } }, { onConflict: 'id' }); 
-        if (error) {
-          const { error: error2 } = await supabase.from('notices').upsert({ id, value: { ...n, id } }, { onConflict: 'id' });
-          if (error2) throw error2;
-        }
+        if (error) throw error;
         await loadData(); 
         notify('Aviso salvo!', 'success'); 
       } catch (err: any) {
         console.error('Error saving notice:', err);
-        notify(`Erro ao salvar aviso: ${err.message}`, 'error');
+        notify(`Erro ao salvar: Verifique se a coluna 'data' existe na tabela 'notices'`, 'error');
       }
     },
     deleteNotice: async (id: string) => { 
