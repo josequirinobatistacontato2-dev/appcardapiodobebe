@@ -50,7 +50,9 @@ import {
   Paintbrush,
   Layers,
   HelpCircle,
-  SmartphoneIcon
+  SmartphoneIcon,
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
 import { Product, User, Category, ThemeSettings, ReleaseType, WebhookLog, PromotionBanner, Notice, HotmartWebhookPayload } from './types';
 import { INITIAL_PRODUCTS, INITIAL_BANNERS, INITIAL_NOTICES, DEFAULT_THEME } from './constants';
@@ -66,18 +68,42 @@ const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const getReleaseStatus = (product: Product, purchaseDate?: string) => {
-  if (!purchaseDate) return { isReleased: false, isLocked: true, message: 'BLOQUEADO', sub: 'TOQUE PARA ADQUIRIR', icon: <Lock size={18} /> };
+const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: boolean = false) => {
   const now = new Date();
-  const pDate = new Date(purchaseDate);
-  if (product.releaseType === ReleaseType.IMMEDIATE) return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: 'Pronto para leitura', icon: <Check size={18} /> };
+  
+  // Se não tem data de compra, está bloqueado (venda)
+  if (!purchaseDate && !isAdmin) {
+    return { isReleased: false, isLocked: true, message: 'BLOQUEADO', sub: 'TOQUE PARA ADQUIRIR', icon: <Lock size={18} /> };
+  }
+
+  // Se for admin, ele pode ver tudo, mas vamos mostrar o status real se for agendado para ele saber que está funcionando
+  const pDate = purchaseDate ? new Date(purchaseDate) : new Date();
+
+  if (product.releaseType === ReleaseType.IMMEDIATE) {
+    return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: 'Pronto para leitura', icon: <Check size={18} /> };
+  }
+
   if (product.releaseType === ReleaseType.SCHEDULED) {
     const days = product.releaseDays || 7;
     const releaseDateObj = new Date(pDate.getTime() + (days * 86400000));
-    if (now >= releaseDateObj) return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: 'Bons estudos!', icon: <Check size={18} /> };
+    
+    if (now >= releaseDateObj || isAdmin) {
+      const isActuallyReleased = now >= releaseDateObj;
+      return { 
+        isReleased: true, 
+        isLocked: false, 
+        message: isActuallyReleased ? 'LIBERADO' : 'LIBERADO (ADMIN)', 
+        sub: isActuallyReleased ? 'Bons estudos!' : `Liberaria em ${Math.ceil((releaseDateObj.getTime() - now.getTime()) / 86400000)} dias`, 
+        icon: <Check size={18} /> 
+      };
+    }
+
     const diffDays = Math.ceil((releaseDateObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    return { isReleased: false, isLocked: false, message: `EM ${diffDays} DIAS`, sub: `Prepare o coração!`, icon: <Clock size={18} /> };
+    return { isReleased: false, isLocked: true, message: `EM ${diffDays} DIAS`, sub: `Prepare o coração!`, icon: <Clock size={18} /> };
   }
+
+  if (isAdmin) return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: 'Acesso Admin', icon: <Check size={18} /> };
+  
   return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: '', icon: <Check size={18} /> };
 };
 
@@ -268,7 +294,7 @@ const LoginView = () => {
       </div>
       
       {/* Tagline Desktop */}
-      <div className="hidden lg:block absolute left-32 bottom-20 z-20 max-w-2xl space-y-4 animate-in slide-in-from-left-20 duration-1000">
+      <div className="hidden lg:block absolute left-32 top-[30%] z-20 max-w-2xl space-y-4 animate-in slide-in-from-left-20 duration-1000">
          <h1 className="text-white text-7xl font-black uppercase italic tracking-tighter leading-none drop-shadow-2xl">{theme.loginTagline}</h1>
          <div className="bg-black/20 backdrop-blur-md px-6 py-3 rounded-full inline-flex items-center gap-3 text-white font-bold text-xs uppercase tracking-widest"><Sparkles className="text-orange-500" size={16}/> {theme.loginSubTagline}</div>
       </div>
@@ -351,15 +377,13 @@ function DashboardView() {
   const [currentBanner, setCurrentBanner] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   
-  const accessible = products.filter(p => user?.role === 'admin' || user?.purchasedProducts?.some(ap => ap.productId === p.id));
-  
   const filteredProducts = useMemo(() => {
-    let list = accessible.filter(p => !p.isBonus);
+    let list = products.filter(p => p.active);
     if (selectedCategory) {
       list = list.filter(p => p.category === selectedCategory);
     }
     return list;
-  }, [accessible, selectedCategory]);
+  }, [products, selectedCategory]);
 
   const activeNotices = notices.filter(n => n.active);
   const activeBanners = banners.filter(b => b.active).sort((a, b) => a.order - b.order);
@@ -448,19 +472,66 @@ function DashboardView() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-12">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 md:gap-6 lg:gap-8">
         {filteredProducts.map(p => {
-          const purchase = user?.purchasedProducts?.find(x => x.productId === p.id);
-          const status = getReleaseStatus(p, purchase?.purchaseDate);
+          const purchase = user?.purchasedProducts?.find(x => x.productId === p.id) || 
+                          (p.isBonus ? user?.purchasedProducts?.find(x => x.productId === p.parentId) : null);
+          const status = getReleaseStatus(p, purchase?.purchaseDate, user?.role === 'admin');
           return (
-            <Link key={p.id} to={status.isReleased ? `/viewer/${p.id}` : '#'} className="block rounded-[20px] md:rounded-[32px] p-2 md:p-3 shadow-md md:shadow-lg transition-all duration-700 hover:-translate-y-2 hover:shadow-xl overflow-hidden bg-white border border-stone-100">
+            <Link 
+              key={p.id} 
+              to={status.isReleased ? `/viewer/${p.id}` : '#'} 
+              onClick={(e) => {
+                if (!status.isReleased && p.checkoutUrl) {
+                  e.preventDefault();
+                  window.open(p.checkoutUrl, '_blank');
+                }
+              }}
+              className="block group rounded-[20px] md:rounded-[32px] p-2 md:p-3 shadow-md md:shadow-lg transition-all duration-700 hover:-translate-y-2 hover:shadow-xl overflow-hidden bg-white border border-stone-100"
+            >
               <div className="relative aspect-[3/4] rounded-[16px] md:rounded-[24px] overflow-hidden mb-2 md:mb-4">
-                <img src={p.coverImage} className={`w-full h-full object-cover ${!status.isReleased ? 'grayscale opacity-60' : ''}`} alt={p.name} />
-                {!status.isReleased && <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center text-white"><Lock size={20} className="md:hidden"/><Lock size={24} className="hidden md:block"/></div>}
+                <img 
+                  src={p.coverImage} 
+                  className={`w-full h-full object-cover transition-all duration-700 ${!status.isReleased ? 'scale-105 blur-[2px] opacity-70' : 'group-hover:scale-110'}`} 
+                  alt={p.name} 
+                />
+                
+                {!status.isReleased && (
+                  <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-[4px] flex flex-col items-center justify-center text-white p-4 text-center transition-all duration-500 group-hover:bg-stone-900/50">
+                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center mb-3 shadow-2xl transform transition-transform duration-500 group-hover:scale-110">
+                      <div className="text-white/90 drop-shadow-lg">
+                        {status.icon}
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-1 transform transition-all duration-500 group-hover:translate-y-[-4px]">
+                      <span className="text-[10px] md:text-xs font-black uppercase tracking-[0.2em] block drop-shadow-md">
+                        {status.message}
+                      </span>
+                      {status.sub && (
+                        <span className="text-[8px] md:text-[9px] font-bold opacity-60 uppercase tracking-widest block">
+                          {status.sub}
+                        </span>
+                      )}
+                    </div>
+
+                    {p.checkoutUrl && (
+                      <div className="mt-4 px-4 py-2 bg-white text-black rounded-full text-[7px] md:text-[8px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0 shadow-lg">
+                        QUERO ACESSO AGORA
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {status.isReleased && (
+                  <div className="absolute top-3 right-3 md:top-4 md:right-4 w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all duration-500">
+                    <ArrowLeft size={18} className="rotate-180" />
+                  </div>
+                )}
               </div>
               <div className="px-2 md:px-4 pb-2 md:pb-4 text-center">
                  <span className="text-[7px] md:text-[8px] font-black uppercase tracking-widest block mb-0.5 md:mb-1" style={{ color: theme.primaryColor }}>{p.category}</span>
-                 <h3 className="text-[9px] md:text-xs font-black uppercase italic tracking-tighter leading-tight line-clamp-2">{p.name}</h3>
+                 <h3 className="text-[9px] md:text-xs font-black uppercase italic tracking-tighter leading-tight line-clamp-2 transition-colors group-hover:text-orange-600">{p.name}</h3>
               </div>
             </Link>
           );
@@ -812,7 +883,7 @@ const AdminView = () => {
                     <span className="text-[8px] font-black uppercase tracking-[0.4em] text-orange-500">// ENDPOINT SEGURO PARA WEBHOOK</span>
                     <div className="space-y-1">
                       <p className="text-[9px] font-black uppercase tracking-widest text-stone-500">URL:</p>
-                      <p className="text-lg font-black text-white tracking-tight">HTTPS://APPCARDAPIODOBEBE.APP/WEBHOOK</p>
+                      <p className="text-lg font-black text-white tracking-tight">HTTPS://ZISIJSWMQOXTFXLGJWGR.SUPABASE.CO/FUNCTIONS/V1/WEBHOOK</p>
                     </div>
                   </div>
 
@@ -1214,11 +1285,26 @@ const AdminView = () => {
 
                 <div className="space-y-2">
                   <label className="text-[8px] font-black uppercase tracking-widest text-stone-300 px-4">REGRA DE LIBERAÇÃO</label>
-                  <select value={editingProduct.releaseType} onChange={e=>setEditingProduct({...editingProduct, releaseType: e.target.value as ReleaseType})} className="w-full p-4 bg-stone-50 rounded-[20px] font-bold text-sm appearance-none outline-none focus:ring-2 focus:ring-orange-500/20">
-                    <option value={ReleaseType.IMMEDIATE}>Imediato</option>
-                    <option value={ReleaseType.SCHEDULED}>7 dias após a compra</option>
-                    <option value={ReleaseType.CONDITIONAL}>Condicional</option>
-                  </select>
+                  <div className="flex gap-2">
+                    <select 
+                      value={editingProduct.releaseType} 
+                      onChange={e=>setEditingProduct({...editingProduct, releaseType: e.target.value as ReleaseType})} 
+                      className="flex-1 p-4 bg-stone-50 rounded-[20px] font-bold text-sm appearance-none outline-none focus:ring-2 focus:ring-orange-500/20"
+                    >
+                      <option value={ReleaseType.IMMEDIATE}>Imediato</option>
+                      <option value={ReleaseType.SCHEDULED}>Agendado (Dias)</option>
+                      <option value={ReleaseType.CONDITIONAL}>Condicional</option>
+                    </select>
+                    {editingProduct.releaseType === ReleaseType.SCHEDULED && (
+                      <input 
+                        type="number" 
+                        value={editingProduct.releaseDays || 7} 
+                        onChange={e => setEditingProduct({...editingProduct, releaseDays: parseInt(e.target.value) || 0})}
+                        className="w-24 p-4 bg-stone-50 rounded-[20px] font-bold text-sm text-center outline-none focus:ring-2 focus:ring-orange-500/20"
+                        placeholder="Dias"
+                      />
+                    )}
+                  </div>
                 </div>
 
                 {!editingProduct.isBonus ? (
@@ -1695,17 +1781,205 @@ const PDFViewerView = () => {
   const { id } = useParams();
   const { products, theme, user } = useApp();
   const navigate = useNavigate();
+  const [numPages, setNumPages] = useState<number>(0);
+  const [pageNumber, setPageNumber] = useState<number>(1);
+  const [zoom, setZoom] = useState<number>(1.5);
+  const [loading, setLoading] = useState(true);
+  const [pdf, setPdf] = useState<any>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const product = products.find(p => p.id === id);
+
+  useEffect(() => {
+    if (!product?.pdfUrl) return;
+    setLoading(true);
+    const loadingTask = getDocument(product.pdfUrl);
+    loadingTask.promise.then((pdfDoc) => {
+      setPdf(pdfDoc);
+      setNumPages(pdfDoc.numPages);
+      setLoading(false);
+    }).catch(err => {
+      console.error('Error loading PDF:', err);
+      setLoading(false);
+    });
+  }, [product?.pdfUrl]);
+
+  const renderTaskRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!pdf || !canvasRef.current) return;
+
+    let isCancelled = false;
+
+    pdf.getPage(pageNumber).then((page: any) => {
+      if (isCancelled) return;
+
+      const canvas = canvasRef.current!;
+      const context = canvas.getContext('2d')!;
+      
+      const viewport = page.getViewport({ scale: zoom });
+      const containerWidth = containerRef.current?.clientWidth || 800;
+      const scale = (containerWidth - 40) / viewport.width;
+      const scaledViewport = page.getViewport({ scale: zoom });
+
+      canvas.height = scaledViewport.height;
+      canvas.width = scaledViewport.width;
+
+      // Cancel previous task if it exists
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+      }
+
+      const renderContext = {
+        canvasContext: context,
+        viewport: scaledViewport
+      };
+      
+      const renderTask = page.render(renderContext);
+      renderTaskRef.current = renderTask;
+
+      renderTask.promise.then(() => {
+        renderTaskRef.current = null;
+      }).catch((err: any) => {
+        if (err.name === 'RenderingCancelledException') {
+          // Expected when we cancel
+        } else {
+          console.error('Render error:', err);
+        }
+      });
+    });
+
+    return () => {
+      isCancelled = true;
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+      }
+    };
+  }, [pdf, pageNumber, zoom]);
+
   if (!product) return <Navigate to="/dashboard" />;
+
+  const changePage = (offset: number) => {
+    setPageNumber(prevPageNumber => {
+      const newPage = prevPageNumber + offset;
+      return Math.min(Math.max(1, newPage), numPages);
+    });
+  };
+
   return (
     <div className="h-screen flex flex-col" style={{ backgroundColor: theme.backgroundColor }}>
-      <header className="h-20 md:h-24 px-6 md:px-12 border-b flex items-center justify-between bg-white shadow-sm">
-        <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 md:gap-3 text-stone-400 font-black text-[8px] md:text-[9px] uppercase tracking-widest hover:text-stone-800 transition-colors"><ArrowLeft size={16} className="md:hidden"/><ArrowLeft size={18} className="hidden md:block"/> VOLTAR</button>
-        <h2 className="text-[10px] md:text-xs font-black uppercase italic tracking-tighter truncate max-w-[150px] md:max-w-none">{product.name}</h2>
-        <div className="w-8 h-8 md:w-12 md:h-12 rounded-full bg-black text-white flex items-center justify-center font-black text-xs shadow-md" style={{ backgroundColor: theme.secondaryColor }}>{user?.name?.charAt(0)}</div>
+      <header className="h-20 md:h-24 px-6 md:px-12 border-b flex items-center justify-between bg-white shadow-sm z-50">
+        <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 md:gap-3 text-stone-400 font-black text-[8px] md:text-[9px] uppercase tracking-widest hover:text-stone-800 transition-colors">
+          <ArrowLeft size={16} className="md:hidden"/><ArrowLeft size={18} className="hidden md:block"/> VOLTAR
+        </button>
+        
+        <div className="flex flex-col items-center">
+          <h2 className="text-[10px] md:text-xs font-black uppercase italic tracking-tighter truncate max-w-[120px] md:max-w-none">{product.name}</h2>
+          {numPages > 0 && (
+            <span className="text-[8px] font-black text-stone-400 uppercase tracking-widest mt-1">Página {pageNumber} de {numPages}</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 md:gap-4">
+          <div className="hidden md:flex items-center gap-2 bg-stone-50 rounded-full p-1 border border-stone-100">
+            <button 
+              onClick={() => setZoom(prev => Math.max(0.5, prev - 0.25))}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-stone-400 hover:text-stone-800 hover:bg-white transition-all"
+              title="Diminuir Zoom"
+            >
+              <ZoomOut size={16} />
+            </button>
+            <span className="text-[9px] font-black text-stone-800 w-10 text-center">{Math.round(zoom * 100)}%</span>
+            <button 
+              onClick={() => setZoom(prev => Math.min(3, prev + 0.25))}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-stone-400 hover:text-stone-800 hover:bg-white transition-all"
+              title="Aumentar Zoom"
+            >
+              <ZoomIn size={16} />
+            </button>
+          </div>
+          <div className="w-8 h-8 md:w-12 md:h-12 rounded-full bg-black text-white flex items-center justify-center font-black text-xs shadow-md" style={{ backgroundColor: theme.secondaryColor }}>{user?.name?.charAt(0)}</div>
+        </div>
       </header>
-      <main className="flex-1 p-4 md:p-8 bg-stone-100 flex justify-center overflow-hidden">
-        <iframe src={`${product.pdfUrl}#toolbar=0`} className="w-full h-full max-w-6xl bg-white shadow-2xl rounded-[24px] md:rounded-[40px] overflow-hidden border border-white" title={product.name} />
+
+      <main ref={containerRef} className="flex-1 p-4 md:p-8 bg-stone-100 flex flex-col items-center overflow-y-auto custom-scrollbar relative">
+        {loading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-stone-400 p-8 text-center bg-stone-100 z-20">
+            <Loader2 size={40} className="animate-spin mb-4 opacity-20" />
+            <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Carregando documento...</p>
+          </div>
+        )}
+        
+        <div className="relative group select-none">
+          <canvas 
+            ref={canvasRef} 
+            onContextMenu={(e) => e.preventDefault()}
+            className="shadow-2xl rounded-lg md:rounded-xl bg-white max-w-full" 
+          />
+          
+          {numPages > 1 && (
+            <>
+              <button 
+                onClick={() => changePage(-1)} 
+                disabled={pageNumber <= 1}
+                className="absolute left-0 md:-left-20 top-1/2 -translate-y-1/2 w-12 h-12 md:w-16 md:h-16 rounded-full bg-white/80 backdrop-blur-md text-stone-800 flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 disabled:opacity-0 transition-all hover:bg-white hover:scale-110 z-20"
+              >
+                <ChevronLeft size={32} />
+              </button>
+              <button 
+                onClick={() => changePage(1)} 
+                disabled={pageNumber >= numPages}
+                className="absolute right-0 md:-right-20 top-1/2 -translate-y-1/2 w-12 h-12 md:w-16 md:h-16 rounded-full bg-white/80 backdrop-blur-md text-stone-800 flex items-center justify-center shadow-xl opacity-0 group-hover:opacity-100 disabled:opacity-0 transition-all hover:bg-white hover:scale-110 z-20"
+              >
+                <ChevronRight size={32} />
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className="mt-6 text-center hidden md:block">
+          <p className="text-[9px] font-black text-stone-400 uppercase tracking-[0.2em]">Dica: Use as setas laterais para navegar entre as páginas</p>
+        </div>
+
+        {/* Mobile Controls */}
+        <div className="mt-8 flex flex-col items-center gap-6 md:hidden">
+          {numPages > 1 && (
+            <div className="flex items-center gap-6">
+              <button 
+                onClick={() => changePage(-1)} 
+                disabled={pageNumber <= 1}
+                className="w-12 h-12 rounded-full bg-white shadow-md flex items-center justify-center text-stone-600 disabled:opacity-30"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <span className="text-[10px] font-black text-stone-400 uppercase tracking-widest">{pageNumber} / {numPages}</span>
+              <button 
+                onClick={() => changePage(1)} 
+                disabled={pageNumber >= numPages}
+                className="w-12 h-12 rounded-full bg-white shadow-md flex items-center justify-center text-stone-600 disabled:opacity-30"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-full shadow-md border border-stone-100">
+            <button 
+              onClick={() => setZoom(prev => Math.max(0.5, prev - 0.25))}
+              className="p-2 text-stone-400 hover:text-stone-800"
+            >
+              <ZoomOut size={18} />
+            </button>
+            <span className="text-[10px] font-black text-stone-800 w-12 text-center">{Math.round(zoom * 100)}%</span>
+            <button 
+              onClick={() => setZoom(prev => Math.min(3, prev + 0.25))}
+              className="p-2 text-stone-400 hover:text-stone-800"
+            >
+              <ZoomIn size={18} />
+            </button>
+          </div>
+        </div>
       </main>
     </div>
   );

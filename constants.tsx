@@ -52,7 +52,7 @@ export const INITIAL_BANNERS: PromotionBanner[] = [
     mobileImageUrl: 'https://picsum.photos/seed/banner1m/800/400',
     title: 'NUTRIÇÃO QUE TRANSFORMA',
     subtitle: 'Descubra o poder da alimentação natural para seu bebê.',
-    linkUrl: 'https://bebesaudavel.com/guia',
+    linkUrl: 'https://www.appcardapiodobebe.com/guia',
     active: true,
     order: 1
   },
@@ -135,7 +135,7 @@ export const DEFAULT_THEME: ThemeSettings = {
   loginBannerUrl: 'https://picsum.photos/seed/loginbg/1920/1080',
   loginMobileImageUrl: '',
   loginCardBackgroundUrl: '',
-  externalSiteUrl: 'https://bebesaudavel.com',
+  externalSiteUrl: 'https://www.appcardapiodobebe.com',
   adminEmail: 'josequirinobatistacontato2@gmail.com',
   hotmartToken: '',
 
