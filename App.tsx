@@ -1526,7 +1526,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         notify('Produto salvo com sucesso!', 'success'); 
       } catch (err: any) {
         console.error('Error saving product:', err);
-        notify(`Erro ao salvar: Verifique se a coluna 'data' existe na tabela 'products'`, 'error');
+        notify(`Erro ao salvar produto: ${err.message || 'Erro desconhecido'}`, 'error');
       }
     },
     deleteProduct: async (id: string) => { 
@@ -1549,7 +1549,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         notify('Cliente salvo!', 'success'); 
       } catch (err: any) {
         console.error('Error saving client:', err);
-        notify(`Erro ao salvar: Verifique se a coluna 'data' existe na tabela 'clients'`, 'error');
+        notify(`Erro ao salvar cliente: ${err.message || 'Erro desconhecido'}`, 'error');
       }
     },
     deleteClient: async (id: string) => { 
@@ -1619,7 +1619,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         notify('Aviso salvo!', 'success'); 
       } catch (err: any) {
         console.error('Error saving notice:', err);
-        notify(`Erro ao salvar: Verifique se a coluna 'data' existe na tabela 'notices'`, 'error');
+        notify(`Erro ao salvar aviso: ${err.message || 'Erro desconhecido'}`, 'error');
       }
     },
     deleteNotice: async (id: string) => { 
