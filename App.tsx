@@ -2,6 +2,7 @@ import React, { useState, createContext, useContext, useRef, useEffect, useMemo 
 import { HashRouter, Routes, Route, Navigate, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import { createClient } from '@supabase/supabase-js';
+import { criarConta, login as authLogin, verificarStatusAtivo, verificarPermissao } from './authService';
 import { 
   Plus, 
   Lock, 
@@ -71,12 +72,12 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: boolean = false) => {
   const now = new Date();
   
-  // Se não tem data de compra, está bloqueado (venda)
+  // Se não tem data de compra e não é admin, está bloqueado (venda)
   if (!purchaseDate && !isAdmin) {
     return { isReleased: false, isLocked: true, message: 'BLOQUEADO', sub: 'TOQUE PARA ADQUIRIR', icon: <Lock size={18} /> };
   }
 
-  // Se for admin, ele pode ver tudo, mas vamos mostrar o status real se for agendado para ele saber que está funcionando
+  // Se for admin e não tiver data de compra (comum), assume que a compra foi "agora" para fins de teste de delay
   const pDate = purchaseDate ? new Date(purchaseDate) : new Date();
 
   if (product.releaseType === ReleaseType.IMMEDIATE) {
@@ -84,27 +85,26 @@ const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: bool
   }
 
   if (product.releaseType === ReleaseType.SCHEDULED) {
-    const days = product.releaseDays || 7;
+    const days = typeof product.releaseDays === 'number' ? product.releaseDays : 7;
     const releaseDateObj = new Date(pDate.getTime() + (days * 86400000));
+    const isActuallyReleased = now >= releaseDateObj;
     
-    if (now >= releaseDateObj || isAdmin) {
-      const isActuallyReleased = now >= releaseDateObj;
-      return { 
-        isReleased: true, 
-        isLocked: false, 
-        message: isActuallyReleased ? 'LIBERADO' : 'LIBERADO (ADMIN)', 
-        sub: isActuallyReleased ? 'Bons estudos!' : `Liberaria em ${Math.ceil((releaseDateObj.getTime() - now.getTime()) / 86400000)} dias`, 
-        icon: <Check size={18} /> 
-      };
+    if (isActuallyReleased) {
+      return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: 'Bons estudos!', icon: <Check size={18} /> };
     }
 
-    const diffDays = Math.ceil((releaseDateObj.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    return { isReleased: false, isLocked: true, message: `EM ${diffDays} DIAS`, sub: `Prepare o coração!`, icon: <Clock size={18} /> };
+    // Se não chegou a data, mas é Admin, permitimos o acesso (isReleased: true) 
+    // mas mantemos isLocked: true para que ele veja o visual de bloqueio e saiba que está funcionando
+    return { 
+      isReleased: isAdmin, 
+      isLocked: true, 
+      message: isAdmin ? `BLOQUEADO (TESTE ADMIN)` : `EM ${Math.ceil((releaseDateObj.getTime() - now.getTime()) / 86400000)} DIAS`, 
+      sub: isAdmin ? `Liberaria em ${Math.ceil((releaseDateObj.getTime() - now.getTime()) / 86400000)} dias` : `Prepare o coração!`, 
+      icon: <Clock size={18} /> 
+    };
   }
 
-  if (isAdmin) return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: 'Acesso Admin', icon: <Check size={18} /> };
-  
-  return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: '', icon: <Check size={18} /> };
+  return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: isAdmin ? 'Acesso Admin' : '', icon: <Check size={18} /> };
 };
 
 const calculateExpiryDate = (startDate: string, accessType: string): string | undefined => {
@@ -188,36 +188,41 @@ const LoginView = () => {
   const handleEmailCheck = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await refreshData();
     const eTrim = email.trim().toLowerCase();
     
+    // Admin bypass
     if (eTrim === theme.adminEmail.toLowerCase()) {
       setStep('password');
       setLoading(false);
       return;
     }
 
-    const client = clients.find(c => c.email.toLowerCase() === eTrim);
-    if (client) {
-      if (isAccessExpired(client)) {
+    try {
+      // Usar a nova lógica de verificação na tabela 'sales'
+      await verificarPermissao(eTrim);
+      
+      // Se passou, verificar se já tem conta ou é primeiro acesso
+      // Aqui ainda usamos a lista de 'clients' local para saber se já definiram senha no nosso sistema
+      // ou se precisamos mostrar a tela de 'first-access'
+      const client = clients.find(c => c.email.toLowerCase() === eTrim);
+      
+      if (client && isAccessExpired(client)) {
         notify('Seu acesso expirou. Entre em contato com o suporte.', 'error');
         setLoading(false);
         return;
       }
-      // With real Supabase auth, we don't know if they have a password set in Auth yet 
-      // without trying to sign in or checking metadata.
-      // For simplicity, we'll assume if they are in 'clients' but don't have a 'password' field 
-      // in our local data, it's first access.
-      if (!client.password) {
+
+      if (!client || !client.password) {
         setStep('first-access');
         notify('Detectamos seu primeiro acesso!', 'success');
       } else {
         setStep('password');
       }
-    } else {
-      notify('Acesso não encontrado.', 'error');
+    } catch (err: any) {
+      notify(err.message || 'Acesso não autorizado.', 'error');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleFinalLogin = async (e: React.FormEvent) => {
@@ -487,51 +492,71 @@ function DashboardView() {
                   window.open(p.checkoutUrl, '_blank');
                 }
               }}
-              className="block group rounded-[20px] md:rounded-[32px] p-2 md:p-3 shadow-md md:shadow-lg transition-all duration-700 hover:-translate-y-2 hover:shadow-xl overflow-hidden bg-white border border-stone-100"
+              className="block group rounded-[24px] md:rounded-[40px] p-2 md:p-3 shadow-sm md:shadow-md transition-all duration-700 hover:-translate-y-2 hover:shadow-2xl overflow-hidden bg-white border border-stone-100 relative"
             >
-              <div className="relative aspect-[3/4] rounded-[16px] md:rounded-[24px] overflow-hidden mb-2 md:mb-4">
+              <div className="relative aspect-[3/4] rounded-[18px] md:rounded-[30px] overflow-hidden mb-2 md:mb-4 shadow-inner">
                 <img 
                   src={p.coverImage} 
-                  className={`w-full h-full object-cover transition-all duration-700 ${!status.isReleased ? 'scale-105 blur-[2px] opacity-70' : 'group-hover:scale-110'}`} 
+                  className={`w-full h-full object-cover transition-all duration-1000 ${status.isLocked ? 'scale-105 blur-[1px] opacity-80' : 'group-hover:scale-110'}`} 
                   alt={p.name} 
                 />
                 
-                {!status.isReleased && (
-                  <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-[4px] flex flex-col items-center justify-center text-white p-4 text-center transition-all duration-500 group-hover:bg-stone-900/50">
-                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center mb-3 shadow-2xl transform transition-transform duration-500 group-hover:scale-110">
-                      <div className="text-white/90 drop-shadow-lg">
+                {/* Badges */}
+                <div className="absolute top-3 left-3 flex flex-col gap-2 z-20">
+                  {status.isLocked && p.checkoutUrl && (
+                    <div className="bg-orange-500 text-white text-[7px] md:text-[8px] font-black px-3 py-1 rounded-full shadow-lg uppercase tracking-widest flex items-center gap-1">
+                      <Sparkles size={10} /> EXCLUSIVO
+                    </div>
+                  )}
+                </div>
+
+                {status.isLocked && (
+                  <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px] flex flex-col items-center justify-center text-white p-4 text-center transition-all duration-500 group-hover:bg-black/40">
+                    <div className="w-14 h-14 md:w-20 md:h-20 rounded-full bg-white/10 backdrop-blur-2xl border border-white/30 flex items-center justify-center mb-4 shadow-[0_0_30px_rgba(0,0,0,0.3)] transform transition-all duration-700 group-hover:scale-110 group-hover:rotate-6 group-hover:bg-white/20">
+                      <div className="text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] scale-125">
                         {status.icon}
                       </div>
                     </div>
                     
-                    <div className="space-y-1 transform transition-all duration-500 group-hover:translate-y-[-4px]">
-                      <span className="text-[10px] md:text-xs font-black uppercase tracking-[0.2em] block drop-shadow-md">
+                    <div className="space-y-1 transform transition-all duration-500 group-hover:translate-y-[-2px]">
+                      <span className="text-[11px] md:text-sm font-black uppercase tracking-[0.4em] block drop-shadow-2xl text-white">
                         {status.message}
                       </span>
                       {status.sub && (
-                        <span className="text-[8px] md:text-[9px] font-bold opacity-60 uppercase tracking-widest block">
+                        <span className="text-[8px] md:text-[10px] font-black opacity-90 uppercase tracking-widest block text-white/80">
                           {status.sub}
                         </span>
                       )}
                     </div>
 
                     {p.checkoutUrl && (
-                      <div className="mt-4 px-4 py-2 bg-white text-black rounded-full text-[7px] md:text-[8px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0 shadow-lg">
-                        QUERO ACESSO AGORA
+                      <div className="mt-6 px-8 py-3 bg-white text-black rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.2em] opacity-0 group-hover:opacity-100 md:group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0 shadow-[0_15px_30px_rgba(0,0,0,0.4)] hover:bg-orange-500 hover:text-white hover:scale-105 active:scale-95">
+                        DESBLOQUEAR AGORA
+                      </div>
+                    )}
+                    
+                    {/* Mobile always show hint if locked and has checkout */}
+                    {p.checkoutUrl && (
+                      <div className="md:hidden mt-4 text-[7px] font-black uppercase tracking-widest opacity-60">
+                        Toque para adquirir
                       </div>
                     )}
                   </div>
                 )}
 
-                {status.isReleased && (
-                  <div className="absolute top-3 right-3 md:top-4 md:right-4 w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all duration-500">
+                {!status.isLocked && status.isReleased && (
+                  <div className="absolute top-3 right-3 md:top-4 md:right-4 w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all duration-500 shadow-lg">
                     <ArrowLeft size={18} className="rotate-180" />
                   </div>
                 )}
               </div>
               <div className="px-2 md:px-4 pb-2 md:pb-4 text-center">
-                 <span className="text-[7px] md:text-[8px] font-black uppercase tracking-widest block mb-0.5 md:mb-1" style={{ color: theme.primaryColor }}>{p.category}</span>
-                 <h3 className="text-[9px] md:text-xs font-black uppercase italic tracking-tighter leading-tight line-clamp-2 transition-colors group-hover:text-orange-600">{p.name}</h3>
+                 <div className="flex items-center justify-center gap-2 mb-1">
+                   <div className="h-[1px] w-4 bg-stone-100"></div>
+                   <span className="text-[7px] md:text-[8px] font-black uppercase tracking-[0.2em] block" style={{ color: theme.primaryColor }}>{p.category}</span>
+                   <div className="h-[1px] w-4 bg-stone-100"></div>
+                 </div>
+                 <h3 className="text-[10px] md:text-[13px] font-black uppercase italic tracking-tighter leading-tight line-clamp-2 transition-colors group-hover:text-orange-600 drop-shadow-sm">{p.name}</h3>
               </div>
             </Link>
           );
@@ -883,7 +908,7 @@ const AdminView = () => {
                     <span className="text-[8px] font-black uppercase tracking-[0.4em] text-orange-500">// ENDPOINT SEGURO PARA WEBHOOK</span>
                     <div className="space-y-1">
                       <p className="text-[9px] font-black uppercase tracking-widest text-stone-500">URL:</p>
-                      <p className="text-lg font-black text-white tracking-tight">HTTPS://ZISIJSWMQOXTFXLGJWGR.SUPABASE.CO/FUNCTIONS/V1/WEBHOOK</p>
+                      <p className="text-lg font-black text-white tracking-tight">https://zisijswmqoxtfxlgjwgr.supabase.co/functions/v1/webhook</p>
                     </div>
                   </div>
 
@@ -1501,9 +1526,9 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const loadData = async () => {
     try {
-      const [pRes, cRes, tRes, nRes, bRes] = await Promise.all([
+      const [pRes, sRes, tRes, nRes, bRes] = await Promise.all([
         supabase.from('products').select('*'),
-        supabase.from('clients').select('*'),
+        supabase.from('sales').select('*'),
         supabase.from('settings').select('*').eq('key', 'theme').maybeSingle(),
         supabase.from('notices').select('*'),
         supabase.from('settings').select('*').eq('key', 'banners_carousel').maybeSingle()
@@ -1513,8 +1538,19 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         setProducts(pRes.data.map(x => (x.data || x.value) as Product));
       }
 
-      if (cRes.data) {
-        const mappedClients = cRes.data.map(x => (x.data || x.value) as User);
+      if (sRes.data) {
+        // Mapear dados da tabela 'sales' (flat) para o formato 'User'
+        const mappedClients: User[] = sRes.data.map(sale => ({
+          id: sale.email,
+          name: sale.name || 'Usuário',
+          email: sale.email,
+          role: 'user',
+          status: sale.status === 'ativo' ? 'active' : 'suspended',
+          accessType: '1year',
+          startDate: sale.created_at,
+          expiryDate: sale.expires_at,
+          purchasedProducts: sale.product_id ? [{ productId: sale.product_id, purchaseDate: sale.created_at }] : []
+        }));
         setClients(mappedClients);
       }
       
@@ -1569,7 +1605,17 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
-          await syncUser(session.user.email!);
+          try {
+            // Verificar se o usuário ainda está ativo na tabela sales
+            await verificarStatusAtivo(session.user.email!);
+            await syncUser(session.user.email!);
+          } catch (err: any) {
+            console.error('Acesso negado no onAuthStateChange:', err.message);
+            notify(err.message || 'Acesso negado.', 'error');
+            setUser(null);
+            localStorage.removeItem('bs_auth_user');
+            await supabase.auth.signOut();
+          }
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
           localStorage.removeItem('bs_auth_user');
@@ -1590,13 +1636,23 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       return;
     }
 
-    // Fetch client data
-    const { data } = await supabase.from('clients').select('*').eq('id', email).maybeSingle();
+    // Fetch sale data from 'sales' table
+    const { data } = await supabase.from('sales').select('*').eq('email', email.trim().toLowerCase()).maybeSingle();
     if (data) {
-      setUser((data.data || data.value) as User);
+      // Map flat sales data to User object
+      const mappedUser: User = {
+        id: data.email,
+        name: data.name || 'Usuário',
+        email: data.email,
+        role: 'user',
+        status: data.status === 'ativo' ? 'active' : 'suspended',
+        accessType: '1year',
+        startDate: data.created_at,
+        expiryDate: data.expires_at,
+        purchasedProducts: data.product_id ? [{ productId: data.product_id, purchaseDate: data.created_at }] : []
+      };
+      setUser(mappedUser);
     } else {
-      // If not found in clients, maybe it's a new user or just auth user
-      // We can create a default user or just set null if not authorized
       setUser(null);
     }
   };
@@ -1628,8 +1684,12 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     },
     saveClient: async (c: User) => { 
       try {
-        const updated = { ...c, expiryDate: calculateExpiryDate(c.startDate, c.accessType) };
-        const { error } = await supabase.from('clients').upsert({ id: c.email, data: updated }, { onConflict: 'id' }); 
+        const { error } = await supabase.from('sales').upsert({ 
+          email: c.email,
+          name: c.name,
+          status: c.status === 'active' ? 'ativo' : 'suspenso',
+          expires_at: c.expiryDate || calculateExpiryDate(c.startDate, c.accessType)
+        }, { onConflict: 'email' }); 
         if (error) throw error;
         await loadData(); 
         notify('Cliente salvo!', 'success'); 
@@ -1638,9 +1698,9 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         notify(`Erro ao salvar cliente: ${err.message || 'Erro desconhecido'}`, 'error');
       }
     },
-    deleteClient: async (id: string) => { 
+    deleteClient: async (email: string) => { 
       try {
-        const { error } = await supabase.from('clients').delete().eq('id', id); 
+        const { error } = await supabase.from('sales').delete().eq('email', email); 
         if (error) throw error;
         await loadData(); 
         notify('Cliente removido.', 'success'); 
@@ -1678,22 +1738,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       localStorage.removeItem('bs_auth_user');
     },
     signIn: async (email: string, pass: string) => {
-      const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
-      if (error) throw error;
+      await authLogin(email, pass);
     },
     signUp: async (email: string, pass: string, name: string) => {
-      const { error, data } = await supabase.auth.signUp({ 
-        email, 
-        password: pass,
-        options: { data: { full_name: name } }
-      });
-      if (error) throw error;
-      
-      // If sign up successful, we might need to update the client record if it exists
-      const client = clients.find(c => c.email.toLowerCase() === email.toLowerCase());
-      if (client) {
-        await supabase.from('clients').update({ data: { ...client, name: name || client.name } }).eq('id', email);
-      }
+      await criarConta(email, pass, name);
     },
     notify, refreshData: loadData,
     saveNotice: async (n: Notice) => { 
