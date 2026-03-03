@@ -42,6 +42,28 @@ export const verificarPermissao = async (email: string) => {
 };
 
 /**
+ * Solicita o reset de senha por e-mail
+ */
+export const solicitarResetSenha = async (email: string) => {
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/#/nova-senha`,
+  });
+  if (error) throw error;
+  return data;
+};
+
+/**
+ * Atualiza a senha do usuário (usado na página de nova senha)
+ */
+export const atualizarSenha = async (novaSenha: string) => {
+  const { data, error } = await supabase.auth.updateUser({
+    password: novaSenha,
+  });
+  if (error) throw error;
+  return data;
+};
+
+/**
  * Cria uma conta no Supabase Auth se o usuário tiver permissão
  */
 export const criarConta = async (email: string, senha: string, nome?: string) => {

@@ -1,8 +1,8 @@
-import React, { useState, createContext, useContext, useRef, useEffect, useMemo } from 'react';
+import React, { useState, createContext, useContext, useRef, useEffect, useMemo, useCallback } from 'react';
 import { HashRouter, Routes, Route, Navigate, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
-import { createClient } from '@supabase/supabase-js';
-import { criarConta, login as authLogin, verificarStatusAtivo, verificarPermissao } from './authService';
+import { supabase } from './supabaseClient';
+import { criarConta, login as authLogin, verificarStatusAtivo, verificarPermissao, solicitarResetSenha, atualizarSenha } from './authService';
 import { 
   Plus, 
   Lock, 
@@ -36,6 +36,7 @@ import {
   Settings,
   Palette,
   Layout as LayoutIcon,
+  Home,
   Unlock,
   Gift,
   ExternalLink,
@@ -53,7 +54,9 @@ import {
   HelpCircle,
   SmartphoneIcon,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  BookOpen,
+  Leaf
 } from 'lucide-react';
 import { Product, User, Category, ThemeSettings, ReleaseType, WebhookLog, PromotionBanner, Notice, HotmartWebhookPayload } from './types';
 import { INITIAL_PRODUCTS, INITIAL_BANNERS, INITIAL_NOTICES, DEFAULT_THEME } from './constants';
@@ -64,14 +67,25 @@ import { INITIAL_PRODUCTS, INITIAL_BANNERS, INITIAL_NOTICES, DEFAULT_THEME } fro
 
 GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@5.4.624/build/pdf.worker.min.mjs';
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://zisijswmqoxtfxlgjwgr.supabase.co';
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_6KFWYlCjjniOKdAhfJDMJA_eJT88ZFE';
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
 const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: boolean = false) => {
   const now = new Date();
   
+  // Debug log para ajudar a identificar problemas de liberação
+  if (purchaseDate) {
+    console.log(`Checking status for ${product.name}: Purchase=${purchaseDate}, Type=${product.releaseType}, Days=${product.releaseDays}, Admin=${isAdmin}`);
+  }
+  
+  // Se o produto estiver forçado como bloqueado pelo admin
+  if (product.forceLocked) {
+    return { 
+      isReleased: isAdmin, // Admin ainda pode ver para testar
+      isLocked: true, 
+      message: 'BLOQUEADO', 
+      sub: 'INDISPONÍVEL NO MOMENTO', 
+      icon: <Lock size={18} /> 
+    };
+  }
+
   // Se não tem data de compra e não é admin, está bloqueado (venda)
   if (!purchaseDate && !isAdmin) {
     return { isReleased: false, isLocked: true, message: 'BLOQUEADO', sub: 'TOQUE PARA ADQUIRIR', icon: <Lock size={18} /> };
@@ -86,20 +100,28 @@ const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: bool
 
   if (product.releaseType === ReleaseType.SCHEDULED) {
     const days = typeof product.releaseDays === 'number' ? product.releaseDays : 7;
-    const releaseDateObj = new Date(pDate.getTime() + (days * 86400000));
+    // Adicionamos um pequeno buffer de 1 minuto para evitar problemas de sincronia de milissegundos
+    const releaseDateObj = new Date(pDate.getTime() + (days * 86400000) - 60000);
     const isActuallyReleased = now >= releaseDateObj;
     
-    if (isActuallyReleased) {
-      return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: 'Bons estudos!', icon: <Check size={18} /> };
+    if (isActuallyReleased || isAdmin) {
+      return { 
+        isReleased: true, 
+        isLocked: isAdmin && !isActuallyReleased, // Mostra como "bloqueado" visualmente para admin se ainda não deu o tempo, mas permite abrir
+        message: isAdmin && !isActuallyReleased ? 'LIBERADO (ADMIN)' : 'LIBERADO', 
+        sub: isAdmin && !isActuallyReleased ? 'Simulando acesso antecipado' : 'Bons estudos!', 
+        icon: <Check size={18} /> 
+      };
     }
 
-    // Se não chegou a data, mas é Admin, permitimos o acesso (isReleased: true) 
-    // mas mantemos isLocked: true para que ele veja o visual de bloqueio e saiba que está funcionando
+    const diffMs = releaseDateObj.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffMs / 86400000);
+
     return { 
-      isReleased: isAdmin, 
+      isReleased: false, 
       isLocked: true, 
-      message: isAdmin ? `BLOQUEADO (TESTE ADMIN)` : `EM ${Math.ceil((releaseDateObj.getTime() - now.getTime()) / 86400000)} DIAS`, 
-      sub: isAdmin ? `Liberaria em ${Math.ceil((releaseDateObj.getTime() - now.getTime()) / 86400000)} dias` : `Prepare o coração!`, 
+      message: diffDays <= 0 ? 'LIBERANDO...' : `EM ${diffDays} DIAS`, 
+      sub: `Prepare o coração!`, 
       icon: <Clock size={18} /> 
     };
   }
@@ -107,9 +129,11 @@ const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: bool
   return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: isAdmin ? 'Acesso Admin' : '', icon: <Check size={18} /> };
 };
 
-const calculateExpiryDate = (startDate: string, accessType: string): string | undefined => {
-  if (accessType === 'lifetime') return undefined;
+const calculateExpiryDate = (startDate: string | undefined, accessType: string | undefined): string | undefined => {
+  if (!startDate || !accessType || accessType === 'lifetime') return undefined;
   const start = new Date(startDate);
+  if (isNaN(start.getTime())) return undefined;
+  
   let days = 0;
   if (accessType === '7days') days = 7;
   else if (accessType === '30days') days = 30;
@@ -149,7 +173,8 @@ interface AppContextType {
   addLog: (log: Omit<WebhookLog, 'id' | 'timestamp'>) => Promise<void>;
   logout: () => Promise<void>;
   signIn: (email: string, pass: string) => Promise<void>;
-  signUp: (email: string, pass: string, name: string) => Promise<void>;
+  solicitarResetSenha: (email: string) => Promise<void>;
+  atualizarSenha: (novaSenha: string) => Promise<void>;
   loading: boolean;
   notify: (message: string, type: 'success' | 'error') => void;
   refreshData: () => Promise<void>;
@@ -175,7 +200,7 @@ const LoginView = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [step, setStep] = useState<'email' | 'password' | 'first-access' | 'forgot-password'>('email');
+  const [step, setStep] = useState<'email' | 'password' | 'forgot-password'>('email');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [passwordError, setPasswordError] = useState('');
@@ -198,25 +223,19 @@ const LoginView = () => {
     }
 
     try {
-      // Usar a nova lógica de verificação na tabela 'sales'
+      // 1. Verificar se o e-mail tem permissão na tabela 'sales'
       await verificarPermissao(eTrim);
       
-      // Se passou, verificar se já tem conta ou é primeiro acesso
-      // Aqui ainda usamos a lista de 'clients' local para saber se já definiram senha no nosso sistema
-      // ou se precisamos mostrar a tela de 'first-access'
-      const client = clients.find(c => c.email.toLowerCase() === eTrim);
+      // 2. Sempre vai para a tela de senha
+      // O usuário escolhe se vai "Entrar" ou se é "Primeiro Acesso"
+      setStep('password');
       
+      const client = clients.find(c => c.email.toLowerCase() === eTrim);
       if (client && isAccessExpired(client)) {
         notify('Seu acesso expirou. Entre em contato com o suporte.', 'error');
+        setStep('email');
         setLoading(false);
         return;
-      }
-
-      if (!client || !client.password) {
-        setStep('first-access');
-        notify('Detectamos seu primeiro acesso!', 'success');
-      } else {
-        setStep('password');
       }
     } catch (err: any) {
       notify(err.message || 'Acesso não autorizado.', 'error');
@@ -250,23 +269,8 @@ const LoginView = () => {
     }
 
     try {
-      if (step === 'first-access') {
-        const error = validatePassword(password);
-        if (error) {
-          setPasswordError(error);
-          setLoading(false);
-          return;
-        }
-        await signUp(eTrim, password, name);
-        notify('Conta criada com sucesso!', 'success');
-        // syncUser in AppProvider will handle the state
-      } else {
-        await signIn(eTrim, password);
-        // syncUser in AppProvider will handle the state
-      }
+      await signIn(eTrim, password);
       
-      // Navigation will be handled by useEffect watching user state or just manual if needed
-      // But AppProvider handles user state change, so we can just wait or navigate
       if (eTrim === theme.adminEmail.toLowerCase()) {
         navigate('/admin');
       } else {
@@ -280,15 +284,18 @@ const LoginView = () => {
     }
   };
 
-  const handleForgotPassword = (e: React.FormEvent) => {
+  const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Simulate email sending
-    setTimeout(() => {
+    try {
+      await solicitarResetSenha(email.trim().toLowerCase());
       notify('Instruções de recuperação enviadas para o seu e-mail.', 'success');
       setStep('email');
+    } catch (err: any) {
+      notify(err.message || 'Erro ao solicitar recuperação de senha.', 'error');
+    } finally {
       setLoading(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -338,33 +345,20 @@ const LoginView = () => {
            ) : (
              <form onSubmit={handleFinalLogin} className="space-y-8">
                 <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">
-                  {step === 'first-access' ? 'CRIE SUA SENHA' : 'SUA SENHA'}
+                  SUA SENHA
                 </h2>
-                {step === 'first-access' && (
-                  <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">
-                    Detectamos seu primeiro acesso. Crie uma senha segura para continuar.
-                  </p>
-                )}
                 <div className="space-y-4">
-                   {step === 'first-access' && (
-                     <input 
-                       type="text" 
-                       required 
-                       value={name} 
-                       onChange={e => setName(e.target.value)} 
-                       className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" 
-                       placeholder="Seu Nome Completo" 
-                     />
-                   )}
                    <div className="relative">
-                     <input type={showPass ? "text" : "password"} required value={password} onChange={e=>{setPassword(e.target.value); setPasswordError('');}} className={`w-full bg-stone-50 p-6 rounded-[30px] border font-bold text-center focus:ring-2 outline-none transition-all ${passwordError ? 'border-red-500 focus:ring-red-500/20' : 'border-stone-100 focus:ring-orange-500/20'}`} placeholder="Senha" />
+                     <input type={showPass ? "text" : "password"} required value={password} onChange={e=>{setPassword(e.target.value); setPasswordError('');}} className={`w-full bg-stone-50 p-6 rounded-[30px] border font-bold text-center focus:ring-2 outline-none transition-all ${passwordError ? 'border-red-500 focus:ring-red-500/20' : 'border-stone-100 focus:ring-orange-500/20'}`} placeholder="Sua Senha" />
                      <button type="button" onClick={()=>setShowPass(!showPass)} className="absolute right-6 top-1/2 -translate-y-1/2 text-stone-300 hover:text-stone-500 transition-colors">{showPass ? <EyeOff size={18}/> : <Eye size={18}/>}</button>
                    </div>
                    {passwordError && <p className="text-[10px] font-bold text-red-500">{passwordError}</p>}
-                   <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (step === 'first-access' ? 'CRIAR ACESSO' : 'ENTRAR')}</button>
+                   <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ENTRAR AGORA'}</button>
                    <div className="flex flex-col gap-3 pt-2">
                      {step === 'password' && (
-                       <button type="button" onClick={()=>setStep('forgot-password')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">ESQUECI MINHA SENHA</button>
+                       <>
+                          <button type="button" onClick={()=>setStep('forgot-password')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">ESQUECI MINHA SENHA</button>
+                       </>
                      )}
                      <button type="button" onClick={()=>setStep('email')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">VOLTAR PARA O E-MAIL</button>
                    </div>
@@ -372,6 +366,82 @@ const LoginView = () => {
              </form>
            )}
         </div>
+      </div>
+    </div>
+  );
+};
+
+const ResetPasswordView = () => {
+  const { theme, notify } = useApp();
+  const navigate = useNavigate();
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+
+  const handleReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password !== confirmPassword) {
+      notify('As senhas não coincidem.', 'error');
+      return;
+    }
+    if (password.length < 6) {
+      notify('A senha deve ter pelo menos 6 caracteres.', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await atualizarSenha(password);
+      notify('Senha atualizada com sucesso! Faça login agora.', 'success');
+      navigate('/');
+    } catch (err: any) {
+      notify(err.message || 'Erro ao atualizar senha.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-stone-100" style={{ backgroundColor: theme.backgroundColor }}>
+      <div className="w-full max-w-md bg-white p-10 md:p-16 rounded-[50px] shadow-2xl border border-white/60 text-center">
+        <form onSubmit={handleReset} className="space-y-8">
+          <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">NOVA SENHA</h2>
+          <p className="text-xs font-bold text-stone-400">Crie uma nova senha segura para o seu acesso.</p>
+          
+          <div className="space-y-4">
+            <div className="relative">
+              <input 
+                type={showPass ? "text" : "password"} 
+                required 
+                value={password} 
+                onChange={e => setPassword(e.target.value)} 
+                className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" 
+                placeholder="Nova Senha" 
+              />
+              <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-6 top-1/2 -translate-y-1/2 text-stone-300 hover:text-stone-500 transition-colors">
+                {showPass ? <EyeOff size={18}/> : <Eye size={18}/>}
+              </button>
+            </div>
+            
+            <input 
+              type={showPass ? "text" : "password"} 
+              required 
+              value={confirmPassword} 
+              onChange={e => setConfirmPassword(e.target.value)} 
+              className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" 
+              placeholder="Confirmar Nova Senha" 
+            />
+
+            <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>
+              {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ATUALIZAR SENHA'}
+            </button>
+            
+            <button type="button" onClick={() => navigate('/')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">
+              VOLTAR PARA O LOGIN
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -391,25 +461,31 @@ function DashboardView() {
   }, [products, selectedCategory]);
 
   const activeNotices = notices.filter(n => n.active);
-  const activeBanners = banners.filter(b => b.active).sort((a, b) => a.order - b.order);
+  
+  const activeBanners = useMemo(() => {
+    return banners.filter(b => b.active).sort((a, b) => a.order - b.order);
+  }, [banners]);
 
-  const nextBanner = () => {
+  const nextBanner = useCallback(() => {
+    if (activeBanners.length === 0) return;
     setCurrentBanner(prev => (prev + 1) % activeBanners.length);
-  };
+  }, [activeBanners.length]);
 
-  const prevBanner = () => {
+  const prevBanner = useCallback(() => {
+    if (activeBanners.length === 0) return;
     setCurrentBanner(prev => (prev - 1 + activeBanners.length) % activeBanners.length);
-  };
+  }, [activeBanners.length]);
 
   useEffect(() => {
     if (activeBanners.length <= 1) return;
-    const interval = setInterval(nextBanner, 5000);
+    const speed = Math.max(theme.bannerSpeed || 5000, 1000); // Mínimo 1 segundo
+    const interval = setInterval(nextBanner, speed);
     return () => clearInterval(interval);
-  }, [activeBanners]);
+  }, [activeBanners.length, theme.bannerSpeed, nextBanner]);
 
   return (
-    <div className="space-y-8 md:space-y-16 pb-32">
-      <div className="flex flex-col gap-2 mb-4 md:mb-8">
+    <div className="space-y-10 pb-32">
+      <div className="hidden">
          <span className="text-[8px] md:text-[10px] font-black text-stone-400 uppercase tracking-[0.4em]">
            Sua biblioteca digital
          </span>
@@ -420,19 +496,42 @@ function DashboardView() {
       </div>
 
       {activeBanners.length > 0 && (
-        <div className="relative w-full aspect-[2/1] md:aspect-[3/1] rounded-[24px] md:rounded-[32px] overflow-hidden shadow-xl group lg:max-h-[420px] bg-stone-200">
+        <div className="relative w-full aspect-[2/1] md:aspect-[3/1] rounded-[24px] md:rounded-[32px] overflow-hidden shadow-xl group lg:max-h-[400px] bg-stone-100">
           {activeBanners.map((banner, index) => (
-            <a key={banner.id} href={banner.linkUrl} target="_blank" rel="noopener noreferrer" className={`absolute inset-0 transition-all duration-1000 ease-in-out ${index === currentBanner ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-full pointer-events-none'}`}>
+            <a 
+              key={banner.id || index} 
+              href={banner.linkUrl} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className={`absolute inset-0 transition-all duration-1000 ease-in-out ${index === currentBanner ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-full pointer-events-none'}`}
+            >
                <picture className="w-full h-full block">
-                  <source media="(max-width: 768px)" srcSet={banner.mobileImageUrl || banner.desktopImageUrl} />
-                  <img src={banner.desktopImageUrl} className="w-full h-full object-cover transition-transform duration-10000 group-hover:scale-105" alt={banner.title} />
+                  <source media="(max-width: 768px)" srcSet={banner.mobileImageUrl || banner.desktopImageUrl || 'https://picsum.photos/seed/banner/800/1200'} />
+                  <img 
+                    src={banner.desktopImageUrl || 'https://picsum.photos/seed/banner/1920/600'} 
+                    className="w-full h-full object-cover transition-transform duration-10000 group-hover:scale-105" 
+                    alt={banner.title || 'Banner'} 
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/error/1920/600';
+                    }}
+                  />
                </picture>
-               {(banner.title || banner.subtitle) && (
-                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex flex-col justify-end p-6 md:p-12">
-                    {banner.title && <h2 className="text-white text-lg md:text-4xl font-black uppercase italic tracking-tighter leading-none mb-1 md:mb-2">{banner.title}</h2>}
-                    {banner.subtitle && <p className="text-white/80 text-[8px] md:text-xs font-bold uppercase tracking-widest">{banner.subtitle}</p>}
-                 </div>
-               )}
+               <div className="absolute inset-0 bg-black/40 flex flex-col justify-center p-10 md:p-20">
+                  <div className="max-w-2xl space-y-4 md:space-y-6">
+                    <h2 className="text-white text-3xl md:text-6xl font-serif font-medium leading-[1.1] drop-shadow-lg">
+                      {banner.title || 'Guia Completo da Introdução Alimentar'}
+                    </h2>
+                    <p className="text-white/95 text-sm md:text-xl font-medium drop-shadow-md tracking-wide">
+                      {banner.subtitle || 'Do 6º mês ao 1º ano com segurança e carinho.'}
+                    </p>
+                    <div className="pt-4 md:pt-6">
+                      <button className="bg-[#5A6B5D] text-white px-8 md:px-10 py-3 md:py-4 rounded-full text-xs md:text-base font-bold flex items-center gap-3 hover:bg-[#4a5a4d] transition-all shadow-xl transform hover:scale-105">
+                        Começar Agora <ChevronRight size={18} />
+                      </button>
+                    </div>
+                  </div>
+               </div>
             </a>
           ))}
 
@@ -456,6 +555,11 @@ function DashboardView() {
           )}
         </div>
       )}
+
+      <div className="flex items-center gap-4 mt-10 mb-2">
+        <h2 className="text-xl md:text-2xl font-serif italic font-medium text-stone-800">Seus Produtos</h2>
+        <div className="flex-1 h-[1px] bg-stone-200" />
+      </div>
 
       <div className="flex flex-wrap gap-2 md:gap-4 overflow-x-auto pb-2 custom-scrollbar no-scrollbar">
         <button 
@@ -599,12 +703,7 @@ const AdminView = () => {
   const [localBanners, setLocalBanners] = useState<PromotionBanner[]>([]);
   useEffect(() => {
     const current = [...banners].sort((a,b) => a.order - b.order);
-    const slots: PromotionBanner[] = [];
-    for(let i=1; i<=3; i++) {
-      const existing = current.find(b => b.order === i);
-      slots.push(existing || { id: `banner-slot-${i}`, desktopImageUrl: '', mobileImageUrl: '', title: '', subtitle: '', linkUrl: '', active: false, order: i });
-    }
-    setLocalBanners(slots);
+    setLocalBanners(current.length > 0 ? current : [{ id: `banner-${Date.now()}`, desktopImageUrl: '', mobileImageUrl: '', title: '', subtitle: '', linkUrl: '', active: false, order: 1 }]);
   }, [banners]);
 
   const tabs = [
@@ -618,6 +717,8 @@ const AdminView = () => {
   ];
 
   const principalProducts = products.filter(p => !p.isBonus);
+
+  const [isSavingClient, setIsSavingClient] = useState(false);
 
   return (
     <div className="space-y-12 pb-48">
@@ -663,7 +764,21 @@ const AdminView = () => {
                    </div>
                    <div className="text-center space-y-1">
                       <h4 className="font-black uppercase italic text-[10px] text-stone-800">{p.name}</h4>
-                      {p.isBonus && <span className="text-[8px] font-black text-emerald-500 uppercase">EXTRA VINCULADO</span>}
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="flex items-center justify-center gap-2">
+                          {p.isBonus && <span className="text-[8px] font-black text-emerald-500 uppercase">EXTRA VINCULADO</span>}
+                          <span className={`text-[8px] font-black uppercase ${p.active ? 'text-emerald-500' : 'text-red-500'}`}>
+                            {p.active ? '• ATIVO' : '• INATIVO'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-center gap-2">
+                          <span className="text-[7px] font-bold text-stone-400 uppercase tracking-widest">
+                            {p.releaseType === ReleaseType.IMMEDIATE ? '⚡ IMEDIATO' : 
+                             p.releaseType === ReleaseType.SCHEDULED ? `⏰ ${p.releaseDays || 7} DIAS` : '🔒 CONDICIONAL'}
+                          </span>
+                          {p.forceLocked && <span className="text-[7px] font-black text-orange-500 uppercase">🔒 FORÇADO</span>}
+                        </div>
+                      </div>
                    </div>
                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center gap-4 rounded-[40px]">
                       <button onClick={() => { setEditingProduct(p); setShowProductForm(true); }} className="w-12 h-12 rounded-full bg-white text-orange-500 flex items-center justify-center"><Edit size={20}/></button>
@@ -756,11 +871,39 @@ const AdminView = () => {
       {/* BANNERS TAB */}
       {activeTab === 'BANNERS' && (
         <div className="space-y-12 animate-in fade-in pb-48">
-           <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-orange-500/10 text-orange-500 rounded-xl flex items-center justify-center"><ImageIcon size={20}/></div>
-              <div className="flex flex-col">
-                <h2 className="text-[11px] font-black uppercase tracking-[0.4em] text-stone-800">GESTÃO DO CARROSSEL (ATÉ 3 BANNERS)</h2>
-                <span className="text-[8px] font-bold text-stone-400 uppercase tracking-widest mt-1">Recomendado: Desktop 1920x640 (3:1) | Mobile 800x400 (2:1)</span>
+           <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-orange-500/10 text-orange-500 rounded-xl flex items-center justify-center"><ImageIcon size={20}/></div>
+                <div className="flex flex-col">
+                  <h2 className="text-[11px] font-black uppercase tracking-[0.4em] text-stone-800">GESTÃO DO CARROSSEL</h2>
+                  <span className="text-[8px] font-bold text-stone-400 uppercase tracking-widest mt-1">Recomendado: Desktop 1920x640 (3:1) | Mobile 800x400 (2:1)</span>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[8px] font-black uppercase tracking-widest text-stone-300 px-2">VELOCIDADE (MS)</label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="number" 
+                      min="1000"
+                      step="500"
+                      value={theme.bannerSpeed || 5000} 
+                      onChange={e => setThemeState(prev => ({...prev, bannerSpeed: Math.max(parseInt(e.target.value) || 0, 0)}))}
+                      className="w-24 p-2 bg-white border border-stone-200 rounded-xl font-bold text-[10px] outline-none focus:ring-2 focus:ring-orange-500/10"
+                    />
+                    <span className="text-[8px] font-bold text-stone-400 uppercase">ms</span>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    const nextOrder = localBanners.length > 0 ? Math.max(...localBanners.map(b => b.order)) + 1 : 1;
+                    setLocalBanners([...localBanners, { id: `banner-${Date.now()}`, desktopImageUrl: '', mobileImageUrl: '', title: '', subtitle: '', linkUrl: '', active: true, order: nextOrder }]);
+                  }}
+                  className="px-6 py-3 bg-stone-900 text-white rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg flex items-center gap-2"
+                >
+                  <Plus size={14}/> NOVO BANNER
+                </button>
               </div>
            </div>
 
@@ -772,19 +915,39 @@ const AdminView = () => {
                          <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center font-black text-base italic shadow-lg">#{index + 1}</div>
                          <span className="text-[10px] font-black uppercase text-stone-300 tracking-[0.3em]">CONFIGURAÇÃO DO BANNER</span>
                       </div>
-                      <button onClick={() => { const next = [...localBanners]; next[index].active = !banner.active; setLocalBanners(next); }} className={`px-6 py-2.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-sm ${banner.active ? 'bg-emerald-500 text-white' : 'bg-stone-50 text-stone-300 border border-stone-100'}`}>
-                         {banner.active ? <Eye size={12}/> : <EyeOff size={12}/>} {banner.active ? 'ATIVO' : 'INATIVO'}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => { const next = [...localBanners]; next[index].active = !banner.active; setLocalBanners(next); }} className={`px-6 py-2.5 rounded-full text-[8px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-sm ${banner.active ? 'bg-emerald-500 text-white' : 'bg-stone-50 text-stone-300 border border-stone-100'}`}>
+                           {banner.active ? <Eye size={12}/> : <EyeOff size={12}/>} {banner.active ? 'ATIVO' : 'INATIVO'}
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setLocalBanners(localBanners.filter((_, i) => i !== index));
+                          }}
+                          className="w-10 h-10 bg-red-50 text-red-500 rounded-full flex items-center justify-center hover:bg-red-100 transition-all"
+                        >
+                          <Trash2 size={16}/>
+                        </button>
+                      </div>
                    </div>
 
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-8">
                       <div className="space-y-3">
                         <label className="text-[9px] font-black uppercase tracking-widest text-stone-300 px-4">IMAGEM DESKTOP (URL)</label>
                         <input value={banner.desktopImageUrl} onChange={e=>{ const next = [...localBanners]; next[index].desktopImageUrl = e.target.value; setLocalBanners(next); }} placeholder="https://..." className="w-full p-4 bg-stone-50 rounded-[20px] font-bold text-xs outline-none focus:ring-2 focus:ring-orange-500/10" />
+                        {banner.desktopImageUrl && (
+                          <div className="mt-4 rounded-[20px] overflow-hidden border border-stone-100 aspect-[3/1] bg-stone-50">
+                            <img src={banner.desktopImageUrl} className="w-full h-full object-cover" alt="Preview Desktop" referrerPolicy="no-referrer" />
+                          </div>
+                        )}
                       </div>
                       <div className="space-y-3">
                         <label className="text-[9px] font-black uppercase tracking-widest text-stone-300 px-4">IMAGEM MOBILE (URL)</label>
                         <input value={banner.mobileImageUrl} onChange={e=>{ const next = [...localBanners]; next[index].mobileImageUrl = e.target.value; setLocalBanners(next); }} placeholder="https://..." className="w-full p-4 bg-stone-50 rounded-[20px] font-bold text-xs outline-none focus:ring-2 focus:ring-orange-500/10" />
+                        {banner.mobileImageUrl && (
+                          <div className="mt-4 rounded-[20px] overflow-hidden border border-stone-100 aspect-[2/3] w-24 bg-stone-50">
+                            <img src={banner.mobileImageUrl} className="w-full h-full object-cover" alt="Preview Mobile" referrerPolicy="no-referrer" />
+                          </div>
+                        )}
                       </div>
                       <div className="space-y-3">
                         <label className="text-[9px] font-black uppercase tracking-widest text-stone-300 px-4">TÍTULO (OPCIONAL)</label>
@@ -821,7 +984,11 @@ const AdminView = () => {
 
            <div className="fixed bottom-24 md:bottom-10 left-6 md:left-[132px] right-6 md:right-12 z-[250]">
               <button 
-                onClick={async () => { await saveBanners(localBanners); notify('Banners salvos!', 'success'); }} 
+                onClick={async () => { 
+                  await saveBanners(localBanners); 
+                  await setTheme();
+                  notify('Banners e configurações salvos!', 'success'); 
+                }} 
                 className="w-full py-6 text-white rounded-[30px] font-black text-[10px] uppercase tracking-[0.4em] shadow-2xl flex items-center justify-center gap-4 hover:scale-[1.02] transition-all transform"
                 style={{ backgroundColor: theme.adminPrimaryColor }}
               >
@@ -974,45 +1141,7 @@ const AdminView = () => {
               <div className="w-10 h-10 bg-orange-500/10 text-orange-500 rounded-xl flex items-center justify-center"><Palette size={20}/></div>
               <h2 className="text-[11px] font-black uppercase tracking-[0.4em] text-stone-800">PERSONALIZAÇÃO E BRANDING</h2>
            </div>
-           
            <div className="bg-white rounded-[50px] p-10 md:p-14 border border-stone-100 shadow-sm space-y-12">
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <h3 className="text-[9px] font-black uppercase tracking-widest text-stone-300">DADOS DE TESTE</h3>
-                  <p className="text-[10px] font-bold text-stone-400">Clique no botão ao lado para preencher o portal com imagens e dados de exemplo.</p>
-                </div>
-                <button onClick={seedTestData} className="px-8 py-4 bg-stone-900 text-white rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-3 hover:bg-black transition-all shadow-lg"><Zap size={16} className="text-orange-500"/> CARREGAR DADOS DE TESTE</button>
-                <button onClick={clearAllData} className="px-8 py-4 bg-red-50 text-red-500 border border-red-100 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-3 hover:bg-red-100 transition-all shadow-sm"><Trash2 size={16}/> LIMPAR BANCO DE DADOS</button>
-              </div>
-
-              <div className="space-y-6 pt-12 border-t border-stone-50">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <h3 className="text-[9px] font-black uppercase tracking-widest text-stone-300">STATUS DO BANCO DE DADOS</h3>
-                    <p className="text-[10px] font-bold text-stone-400">Verifique se as tabelas necessárias foram criadas no Supabase.</p>
-                  </div>
-                  <button 
-                    onClick={handleCheckDb} 
-                    disabled={isCheckingDb}
-                    className="px-8 py-4 bg-stone-100 text-stone-800 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-3 hover:bg-stone-200 transition-all disabled:opacity-50"
-                  >
-                    {isCheckingDb ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} className="text-emerald-500"/>} 
-                    VERIFICAR TABELAS
-                  </button>
-                </div>
-
-                {Object.keys(dbStatus).length > 0 && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-in fade-in slide-in-from-top-4">
-                    {Object.entries(dbStatus).map(([table, exists]) => (
-                      <div key={table} className={`p-4 rounded-2xl border flex items-center justify-between ${exists ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
-                        <span className="text-[10px] font-black uppercase tracking-widest text-stone-600">{table}</span>
-                        {exists ? <Check size={14} className="text-emerald-500" /> : <X size={14} className="text-red-500" />}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
               {/* BANNERS E LINKS */}
               <div className="space-y-8 pt-12 border-t border-stone-50">
                  <div className="flex items-center gap-3">
@@ -1310,25 +1439,21 @@ const AdminView = () => {
 
                 <div className="space-y-2">
                   <label className="text-[8px] font-black uppercase tracking-widest text-stone-300 px-4">REGRA DE LIBERAÇÃO</label>
-                  <div className="flex gap-2">
-                    <select 
-                      value={editingProduct.releaseType} 
-                      onChange={e=>setEditingProduct({...editingProduct, releaseType: e.target.value as ReleaseType})} 
-                      className="flex-1 p-4 bg-stone-50 rounded-[20px] font-bold text-sm appearance-none outline-none focus:ring-2 focus:ring-orange-500/20"
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setEditingProduct({...editingProduct, releaseType: ReleaseType.IMMEDIATE, releaseDays: 0})}
+                      className={`p-4 rounded-[20px] font-bold text-xs uppercase tracking-widest transition-all ${editingProduct.releaseType === ReleaseType.IMMEDIATE ? 'bg-orange-500 text-white shadow-lg' : 'bg-stone-50 text-stone-400 hover:bg-stone-100'}`}
                     >
-                      <option value={ReleaseType.IMMEDIATE}>Imediato</option>
-                      <option value={ReleaseType.SCHEDULED}>Agendado (Dias)</option>
-                      <option value={ReleaseType.CONDITIONAL}>Condicional</option>
-                    </select>
-                    {editingProduct.releaseType === ReleaseType.SCHEDULED && (
-                      <input 
-                        type="number" 
-                        value={editingProduct.releaseDays || 7} 
-                        onChange={e => setEditingProduct({...editingProduct, releaseDays: parseInt(e.target.value) || 0})}
-                        className="w-24 p-4 bg-stone-50 rounded-[20px] font-bold text-sm text-center outline-none focus:ring-2 focus:ring-orange-500/20"
-                        placeholder="Dias"
-                      />
-                    )}
+                      Imediato
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingProduct({...editingProduct, releaseType: ReleaseType.SCHEDULED, releaseDays: 7})}
+                      className={`p-4 rounded-[20px] font-bold text-xs uppercase tracking-widest transition-all ${editingProduct.releaseType === ReleaseType.SCHEDULED ? 'bg-orange-500 text-white shadow-lg' : 'bg-stone-50 text-stone-400 hover:bg-stone-100'}`}
+                    >
+                      Após 7 Dias
+                    </button>
                   </div>
                 </div>
 
@@ -1354,6 +1479,7 @@ const AdminView = () => {
                     </select>
                   </div>
                 )}
+
 
                 <div className="col-span-full space-y-2">
                   <label className="text-[8px] font-black uppercase tracking-widest text-stone-300 px-4">DESCRIÇÃO DO PRODUTO</label>
@@ -1426,27 +1552,109 @@ const AdminView = () => {
                     {products.map(p => {
                       const hasAccess = editingClient.purchasedProducts?.some(pp => pp.productId === p.id);
                       return (
-                        <button 
+                        <div 
                           key={p.id} 
-                          onClick={() => {
-                            const current = editingClient.purchasedProducts || [];
-                            const next = hasAccess 
-                              ? current.filter(pp => pp.productId !== p.id)
-                              : [...current, { productId: p.id, purchaseDate: new Date().toISOString() }];
-                            setEditingClient({...editingClient, purchasedProducts: next});
-                          }}
-                          className={`w-full p-4 rounded-[20px] flex items-center justify-between transition-all border ${hasAccess ? 'bg-orange-50 border-orange-100' : 'bg-stone-50 border-transparent opacity-60'}`}
+                          className={`w-full p-4 rounded-[20px] flex flex-col gap-3 transition-all border ${hasAccess ? 'bg-orange-50 border-orange-100' : 'bg-stone-50 border-transparent opacity-60'}`}
                         >
-                          <span className={`text-[10px] font-black uppercase italic tracking-tight ${hasAccess ? 'text-orange-600' : 'text-stone-400'}`}>{p.name}</span>
-                          {hasAccess ? <Unlock size={16} className="text-orange-500" /> : <Lock size={16} className="text-stone-300" />}
-                        </button>
+                          <div className="flex items-center justify-between">
+                            <button 
+                              onClick={() => {
+                                const current = editingClient.purchasedProducts || [];
+                                const next = hasAccess 
+                                  ? current.filter(pp => pp.productId !== p.id)
+                                  : [...current, { productId: p.id, purchaseDate: new Date().toISOString() }];
+                                setEditingClient({...editingClient, purchasedProducts: next});
+                              }}
+                              className="flex items-center gap-3 text-left"
+                            >
+                              {hasAccess ? <Unlock size={16} className="text-orange-500" /> : <Lock size={16} className="text-stone-300" />}
+                              <span className={`text-[10px] font-black uppercase italic tracking-tight ${hasAccess ? 'text-orange-600' : 'text-stone-400'}`}>{p.name}</span>
+                            </button>
+                          </div>
+                          
+                          {hasAccess && (
+                            <div className="flex flex-col gap-2 pl-7">
+                              <label className="text-[7px] font-black text-stone-400 uppercase tracking-widest">LIBERAÇÃO DO PRODUTO</label>
+                              <div className="flex gap-2">
+                                {(() => {
+                                  const pDateStr = editingClient.purchasedProducts?.find(pp => pp.productId === p.id)?.purchaseDate;
+                                  const pDate = pDateStr ? new Date(pDateStr) : new Date();
+                                  const now = new Date();
+                                  // Considera imediato se a data de compra for há mais de 7 dias
+                                  const isImmediate = (now.getTime() - pDate.getTime()) > (7 * 86400000);
+                                  
+                                  return (
+                                    <>
+                                      <button 
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          // Usamos 30 dias atrás para garantir liberação imediata em qualquer cenário
+                                          const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+                                          const currentProducts = editingClient.purchasedProducts || [];
+                                          const next = currentProducts.map(pp => 
+                                            pp.productId === p.id ? { ...pp, purchaseDate: thirtyDaysAgo } : pp
+                                          );
+                                          setEditingClient({...editingClient, purchasedProducts: next});
+                                        }}
+                                        className={`flex-1 py-3 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all border ${isImmediate ? 'bg-orange-500 text-white border-orange-600 shadow-lg' : 'bg-stone-50 text-stone-400 border-stone-200'}`}
+                                      >
+                                        LIBERAR IMEDIATO
+                                      </button>
+                                      <button 
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const nowIso = new Date().toISOString();
+                                          const currentProducts = editingClient.purchasedProducts || [];
+                                          const next = currentProducts.map(pp => 
+                                            pp.productId === p.id ? { ...pp, purchaseDate: nowIso } : pp
+                                          );
+                                          setEditingClient({...editingClient, purchasedProducts: next});
+                                        }}
+                                        className={`flex-1 py-3 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all border ${!isImmediate ? 'bg-orange-500 text-white border-orange-600 shadow-lg' : 'bg-stone-50 text-stone-400 border-stone-200'}`}
+                                      >
+                                        APÓS 7 DIAS
+                                      </button>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
                 </div>
               </div>
 
-              <button onClick={async () => { await saveClient(editingClient as User); setShowClientForm(false); }} className="w-full py-6 bg-black text-white rounded-[25px] font-black text-xs uppercase tracking-[0.3em] shadow-2xl hover:bg-stone-800 transition-colors">CONFIRMAR</button>
+              <button 
+                disabled={isSavingClient}
+                onClick={async () => { 
+                  if (!editingClient.email || !editingClient.name) {
+                    notify('Preencha nome e e-mail.', 'error');
+                    return;
+                  }
+                  setIsSavingClient(true);
+                  try {
+                    await saveClient(editingClient as User); 
+                    setShowClientForm(false); 
+                  } catch (err) {
+                    // Erro já notificado no saveClient
+                  } finally {
+                    setIsSavingClient(false);
+                  }
+                }} 
+                className={`w-full py-6 bg-black text-white rounded-[25px] font-black text-xs uppercase tracking-[0.3em] shadow-2xl hover:bg-stone-800 transition-all flex items-center justify-center gap-3 ${isSavingClient ? 'opacity-70 cursor-not-allowed' : ''}`}
+              >
+                {isSavingClient ? (
+                  <>
+                    <Loader2 className="animate-spin" size={18} />
+                    PROCESSANDO...
+                  </>
+                ) : 'CONFIRMAR'}
+              </button>
           </div>
         </div>
       )}
@@ -1539,19 +1747,43 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       }
 
       if (sRes.data) {
-        // Mapear dados da tabela 'sales' (flat) para o formato 'User'
-        const mappedClients: User[] = sRes.data.map(sale => ({
-          id: sale.email,
-          name: sale.name || 'Usuário',
-          email: sale.email,
-          role: 'user',
-          status: sale.status === 'ativo' ? 'active' : 'suspended',
-          accessType: '1year',
-          startDate: sale.created_at,
-          expiryDate: sale.expires_at,
-          purchasedProducts: sale.product_id ? [{ productId: sale.product_id, purchaseDate: sale.created_at }] : []
-        }));
-        setClients(mappedClients);
+        // Agrupar vendas por e-mail para lidar com múltiplos produtos por usuário
+        const clientsMap = new Map<string, User>();
+        
+        sRes.data.forEach(sale => {
+          const email = sale.email.toLowerCase();
+          if (!clientsMap.has(email)) {
+            clientsMap.set(email, {
+              id: email,
+              name: sale.name || 'Usuário',
+              email: email,
+              role: 'user',
+              status: sale.status === 'ativo' ? 'active' : 'suspended',
+              accessType: '1year',
+              startDate: sale.created_at,
+              expiryDate: sale.expires_at,
+              purchasedProducts: []
+            });
+          }
+          
+          if (sale.product_id) {
+            clientsMap.get(email)!.purchasedProducts.push({
+              productId: sale.product_id,
+              purchaseDate: sale.created_at
+            });
+          }
+        });
+        
+        const allClients = Array.from(clientsMap.values());
+        setClients(allClients);
+
+        // Se houver um usuário logado (que não seja admin), atualizar os dados dele também
+        if (user && user.role !== 'admin') {
+          const updatedUser = allClients.find(c => c.email.toLowerCase() === user.email.toLowerCase());
+          if (updatedUser) {
+            setUser(updatedUser);
+          }
+        }
       }
       
       if (tRes.data) {
@@ -1577,6 +1809,8 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   };
 
   useEffect(() => {
+    let subscription: { unsubscribe: () => void } | null = null;
+
     const initAuth = async () => {
       setLoading(true);
       await loadData();
@@ -1585,16 +1819,13 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       if (session?.user) {
         await syncUser(session.user.email!);
       } else {
-        // Fallback to localStorage for simulated session (especially for admin bypass)
         const saved = localStorage.getItem('bs_auth_user');
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
-            // Verify if it's the admin email from theme
             if (parsed.email.toLowerCase() === theme.adminEmail.toLowerCase()) {
               setUser(parsed);
             } else {
-              // For students, we might want to be stricter or allow simulated if not in Auth yet
               setUser(parsed);
             }
           } catch (e) {
@@ -1603,10 +1834,9 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         }
       }
       
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
           try {
-            // Verificar se o usuário ainda está ativo na tabela sales
             await verificarStatusAtivo(session.user.email!);
             await syncUser(session.user.email!);
           } catch (err: any) {
@@ -1622,12 +1852,16 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         }
       });
 
+      subscription = authListener.subscription;
       setLoading(false);
-      return () => subscription.unsubscribe();
     };
 
     initAuth();
-  }, [theme.adminEmail]); // Re-run if admin email changes in settings
+
+    return () => {
+      if (subscription) subscription.unsubscribe();
+    };
+  }, [theme.adminEmail]);
 
   const syncUser = async (email: string) => {
     // Check if it's admin
@@ -1636,20 +1870,32 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       return;
     }
 
-    // Fetch sale data from 'sales' table
-    const { data } = await supabase.from('sales').select('*').eq('email', email.trim().toLowerCase()).maybeSingle();
-    if (data) {
+    // Fetch all sale data from 'sales' table for this email
+    const { data: salesData } = await supabase.from('sales').select('*').eq('email', email.trim().toLowerCase());
+    
+    if (salesData && salesData.length > 0) {
+      // Use the first record for basic info (name, status, etc)
+      const primaryData = salesData[0];
+      
+      // Map all sales records to purchasedProducts array
+      const purchasedProducts = salesData
+        .filter(sale => sale.product_id)
+        .map(sale => ({
+          productId: sale.product_id,
+          purchaseDate: sale.created_at
+        }));
+
       // Map flat sales data to User object
       const mappedUser: User = {
-        id: data.email,
-        name: data.name || 'Usuário',
-        email: data.email,
+        id: primaryData.email,
+        name: primaryData.name || 'Usuário',
+        email: primaryData.email,
         role: 'user',
-        status: data.status === 'ativo' ? 'active' : 'suspended',
+        status: primaryData.status === 'ativo' ? 'active' : 'suspended',
         accessType: '1year',
-        startDate: data.created_at,
-        expiryDate: data.expires_at,
-        purchasedProducts: data.product_id ? [{ productId: data.product_id, purchaseDate: data.created_at }] : []
+        startDate: primaryData.created_at,
+        expiryDate: primaryData.expires_at,
+        purchasedProducts: purchasedProducts
       };
       setUser(mappedUser);
     } else {
@@ -1683,19 +1929,70 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       }
     },
     saveClient: async (c: User) => { 
+      console.log('Iniciando saveClient para:', c.email);
+      
       try {
-        const { error } = await supabase.from('sales').upsert({ 
-          email: c.email,
-          name: c.name,
-          status: c.status === 'active' ? 'ativo' : 'suspenso',
-          expires_at: c.expiryDate || calculateExpiryDate(c.startDate, c.accessType)
-        }, { onConflict: 'email' }); 
-        if (error) throw error;
-        await loadData(); 
-        notify('Cliente salvo!', 'success'); 
+        const cleanEmail = c.email?.trim().toLowerCase();
+        if (!cleanEmail) throw new Error('E-mail é obrigatório');
+
+        // 1. Remover todos os registros atuais deste e-mail
+        console.log('Removendo registros antigos de:', cleanEmail);
+        const { error: deleteError } = await supabase.from('sales').delete().eq('email', cleanEmail);
+        
+        if (deleteError) {
+          console.error('Erro ao deletar registros antigos:', deleteError);
+          throw deleteError;
+        }
+
+        // 2. Preparar dados para inserção
+        const status = c.status === 'active' ? 'ativo' : 'suspenso';
+        const expiryDate = c.expiryDate || calculateExpiryDate(c.startDate, c.accessType);
+        const createdAt = c.startDate || new Date().toISOString();
+
+        let insertPromise;
+        if (!c.purchasedProducts || c.purchasedProducts.length === 0) {
+          console.log('Inserindo registro básico (sem produtos)');
+          insertPromise = supabase.from('sales').insert({
+            email: cleanEmail,
+            name: c.name,
+            status,
+            expires_at: expiryDate,
+            created_at: createdAt
+          });
+        } else {
+          console.log('Inserindo múltiplos registros para produtos:', c.purchasedProducts.length);
+          const salesToInsert = c.purchasedProducts.map(pp => ({
+            email: cleanEmail,
+            name: c.name,
+            status,
+            expires_at: expiryDate,
+            product_id: pp.productId,
+            created_at: pp.purchaseDate || createdAt
+          }));
+          insertPromise = supabase.from('sales').insert(salesToInsert);
+        }
+
+        const { error: insertError } = await insertPromise;
+        if (insertError) {
+          console.error('Erro detalhado na inserção:', insertError);
+          if (insertError.code === '23505') {
+            throw new Error('Conflito de dados. Tente novamente.');
+          }
+          throw insertError;
+        }
+
+        console.log('Salvamento concluído no banco, recarregando dados...');
+        try {
+          await loadData(); 
+        } catch (loadErr) {
+          console.warn('Dados salvos, mas houve erro ao recarregar a lista:', loadErr);
+        }
+        
+        notify('Cliente e acessos salvos com sucesso!', 'success'); 
       } catch (err: any) {
-        console.error('Error saving client:', err);
-        notify(`Erro ao salvar cliente: ${err.message || 'Erro desconhecido'}`, 'error');
+        console.error('Falha crítica no saveClient:', err);
+        notify(`Erro ao salvar: ${err.message || 'Erro de conexão'}`, 'error');
+        throw err; 
       }
     },
     deleteClient: async (email: string) => { 
@@ -1733,15 +2030,29 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     },
     setThemeState,
     logout: async () => { 
-      await supabase.auth.signOut();
+      // Clear state immediately to provide instant feedback
       setUser(null); 
       localStorage.removeItem('bs_auth_user');
+      
+      try {
+        // Don't await this to avoid blocking the UI if it hangs
+        supabase.auth.signOut().catch(e => console.error('Logout error:', e));
+      } catch (e) {
+        console.error('Logout error:', e);
+      }
+      
+      notify('Sessão encerrada com sucesso.', 'success');
+      // Force navigation to home
+      window.location.href = window.location.origin + window.location.pathname + '#/';
     },
     signIn: async (email: string, pass: string) => {
       await authLogin(email, pass);
     },
-    signUp: async (email: string, pass: string, name: string) => {
-      await criarConta(email, pass, name);
+    solicitarResetSenha: async (email: string) => {
+      await solicitarResetSenha(email);
+    },
+    atualizarSenha: async (novaSenha: string) => {
+      await atualizarSenha(novaSenha);
     },
     notify, refreshData: loadData,
     saveNotice: async (n: Notice) => { 
@@ -1793,7 +2104,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         // Note: Supabase requires a filter for delete, so we use neq('id', '0') which matches everything
         await Promise.all([
           supabase.from('products').delete().neq('id', '0'),
-          supabase.from('clients').delete().neq('id', '0'),
+          supabase.from('sales').delete().neq('email', '0'),
           supabase.from('notices').delete().neq('id', '0')
         ]);
         await loadData();
@@ -1806,7 +2117,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       }
     },
     checkDatabase: async () => {
-      const tables = ['products', 'clients', 'settings', 'notices'];
+      const tables = ['products', 'sales', 'settings', 'notices'];
       const results: Record<string, boolean> = {};
       
       for (const table of tables) {
@@ -2039,15 +2350,35 @@ function Layout({ children }: { children?: React.ReactNode }) {
   const activeNotices = notices.filter(n => n.active);
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row" style={{ backgroundColor: theme.backgroundColor }}>
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex w-24 lg:w-32 bg-white border-r flex-col items-center py-12 sticky top-0 h-screen" style={{ backgroundColor: theme.sidebarColor }}>
-        <div className="flex-1 flex flex-col gap-8">
-          <Link to="/dashboard" className="w-14 h-14 bg-black text-white rounded-[20px] flex items-center justify-center shadow-xl hover:scale-105 transition-transform" style={{ backgroundColor: theme.primaryColor }}><LayoutIcon size={22}/></Link>
-          {user?.role === 'admin' && <Link to="/admin" className="w-14 h-14 bg-blue-500/10 rounded-[20px] flex items-center justify-center text-blue-500 border border-blue-100 hover:scale-105 transition-transform"><Settings size={22}/></Link>}
-        </div>
-        <button onClick={logout} className="p-4 bg-red-50 text-red-500 rounded-2xl hover:bg-red-100 transition-colors"><LogOut size={20}/></button>
-      </aside>
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: '#FDFBF7' }}>
+      <div className="flex flex-1 flex-col md:flex-row">
+        {/* Desktop Sidebar */}
+        <aside className="hidden md:flex w-20 lg:w-24 bg-[#2D4635] flex-col items-center py-10 sticky top-0 h-screen shadow-2xl">
+          <div className="flex flex-col gap-6 items-center w-full">
+            <Link to="/dashboard" className="w-12 h-12 bg-white/10 text-white rounded-2xl flex items-center justify-center shadow-lg hover:bg-white/20 transition-all">
+              <LayoutIcon size={22}/>
+            </Link>
+            <Link to="/dashboard" className="w-12 h-12 bg-white/10 text-white rounded-2xl flex items-center justify-center shadow-lg hover:bg-white/20 transition-all">
+              <BookOpen size={22}/>
+            </Link>
+            
+            {user?.role === 'admin' && (
+              <Link to="/admin" className="w-12 h-12 bg-white/10 text-white rounded-2xl flex items-center justify-center shadow-lg hover:bg-white/20 transition-all" title="Painel Admin">
+                <Settings size={22}/>
+              </Link>
+            )}
+            
+            <div className="w-8 h-[1px] bg-white/10 my-2" />
+            
+            <button 
+              onClick={logout} 
+              className="w-12 h-12 bg-white/10 text-white rounded-2xl flex items-center justify-center hover:bg-red-500/20 transition-all"
+              title="Sair do Portal"
+            >
+              <LogOut size={22}/>
+            </button>
+          </div>
+        </aside>
 
       {/* Mobile Bottom Nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t z-[200] px-6 py-4 flex items-center justify-around shadow-[0_-10px_30px_rgba(0,0,0,0.05)]" style={{ backgroundColor: theme.sidebarColor }}>
@@ -2056,88 +2387,102 @@ function Layout({ children }: { children?: React.ReactNode }) {
         <button onClick={logout} className="p-3 text-red-400 hover:text-red-500 transition-colors"><LogOut size={24}/></button>
       </nav>
 
-      <main className="flex-1 px-6 md:px-12 py-8 md:py-16 custom-scrollbar overflow-y-auto pb-32 md:pb-16">
-        <header className="flex justify-between items-center mb-10 md:mb-16">
-          <div className="flex flex-col items-start leading-none">
-            <span className="font-bold tracking-tight text-[10px] md:text-sm text-stone-800">Cardápio do</span>
-            <span className="font-black -mt-0.5 text-lg md:text-xl" style={{ color: theme.secondaryColor }}>Bebê</span>
-          </div>
-          
-          <div className="flex items-center gap-3 md:gap-6">
-            <div className="relative">
-              <button 
-                onClick={() => setShowNotices(!showNotices)}
-                className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-all ${showNotices ? 'bg-orange-500 text-white shadow-lg' : 'bg-white text-stone-400 border border-stone-100 shadow-sm'}`}
-              >
-                <Bell size={18} className="md:hidden" />
-                <Bell size={20} className="hidden md:block" />
-                {activeNotices.length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 md:w-5 md:h-5 bg-red-500 text-white text-[8px] md:text-[10px] font-black rounded-full flex items-center justify-center border-2 border-white animate-bounce">
-                    {activeNotices.length}
-                  </span>
+      <main className="flex-1 px-6 md:px-12 py-6 md:py-10 custom-scrollbar overflow-y-auto pb-32 md:pb-16">
+        <header className="flex flex-col gap-6 mb-10">
+          <div className="flex justify-between items-start">
+            <div className="flex items-center gap-2">
+              <span className="text-stone-500 text-xs md:text-sm font-medium">Bem-vindo(a), {user?.name || 'Andréa Silva'}</span>
+              <span className="bg-[#B88E5D]/20 text-[#B88E5D] text-[8px] md:text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest border border-[#B88E5D]/30">PREMIUM</span>
+            </div>
+            
+            <div className="flex items-center gap-4 md:gap-6">
+              <div className="relative">
+                <button 
+                  onClick={() => setShowNotices(!showNotices)}
+                  className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all ${showNotices ? 'bg-[#5A6B5D] text-white shadow-lg' : 'bg-white/60 backdrop-blur-md text-stone-400 border border-stone-100 shadow-sm hover:bg-white hover:shadow-md'}`}
+                >
+                  <Bell size={18} />
+                  {activeNotices.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-black rounded-full flex items-center justify-center border-2 border-white">
+                      {activeNotices.length}
+                    </span>
+                  )}
+                </button>
+
+                {showNotices && (
+                  <div className="absolute right-0 mt-4 w-[280px] md:w-80 bg-white rounded-[24px] md:rounded-[32px] shadow-2xl border border-stone-100 z-[100] p-5 md:p-6 space-y-4 animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center justify-between border-b border-stone-50 pb-4">
+                      <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-stone-300">Avisos e Notificações</span>
+                      <button onClick={() => setShowNotices(false)} className="text-stone-300 hover:text-stone-500"><X size={14}/></button>
+                    </div>
+                    <div className="space-y-4 max-h-80 md:max-h-96 overflow-y-auto custom-scrollbar pr-2">
+                      {theme.supportWhatsappActive && (
+                        <a 
+                          href={`https://wa.me/${theme.supportWhatsappNumber}?text=${encodeURIComponent(theme.supportWhatsappMessage)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 md:gap-4 p-3 md:p-4 bg-emerald-50 rounded-xl md:rounded-2xl border border-emerald-100 group hover:bg-emerald-100 transition-all"
+                        >
+                          <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+                            <MessageCircle size={16} className="md:hidden" />
+                            <MessageCircle size={20} className="hidden md:block" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="text-[10px] md:text-[11px] font-black uppercase italic text-emerald-700">Suporte WhatsApp</h4>
+                            <p className="text-[8px] md:text-[10px] font-bold text-emerald-600/70 uppercase tracking-widest">Fale conosco agora</p>
+                          </div>
+                          <ChevronRight size={14} className="text-emerald-400" />
+                        </a>
+                      )}
+
+                      {activeNotices.length > 0 ? activeNotices.map(n => (
+                        <div key={n.id} className="p-3 md:p-4 bg-stone-50 rounded-xl md:rounded-2xl space-y-1">
+                          <h4 className="text-[10px] md:text-[11px] font-black uppercase italic text-stone-800">{n.title}</h4>
+                          <p className="text-[9px] md:text-[10px] font-medium text-stone-500 leading-relaxed">{n.content}</p>
+                        </div>
+                      )) : (
+                        <div className="py-6 md:py-8 text-center space-y-2">
+                          <div className="w-10 h-10 md:w-12 md:h-12 bg-stone-50 rounded-full flex items-center justify-center mx-auto text-stone-200"><BellOff size={20}/></div>
+                          <p className="text-[9px] md:text-[10px] font-bold text-stone-300 uppercase tracking-widest">Nenhum aviso no momento</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
-              </button>
-
-              {showNotices && (
-                <div className="absolute right-0 mt-4 w-[280px] md:w-80 bg-white rounded-[24px] md:rounded-[32px] shadow-2xl border border-stone-100 z-[100] p-5 md:p-6 space-y-4 animate-in fade-in slide-in-from-top-2">
-                  <div className="flex items-center justify-between border-b border-stone-50 pb-4">
-                    <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-stone-300">Avisos e Notificações</span>
-                    <button onClick={() => setShowNotices(false)} className="text-stone-300 hover:text-stone-500"><X size={14}/></button>
-                  </div>
-                  <div className="space-y-4 max-h-80 md:max-h-96 overflow-y-auto custom-scrollbar pr-2">
-                    {theme.supportWhatsappActive && (
-                      <a 
-                        href={`https://wa.me/${theme.supportWhatsappNumber}?text=${encodeURIComponent(theme.supportWhatsappMessage)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-3 md:gap-4 p-3 md:p-4 bg-emerald-50 rounded-xl md:rounded-2xl border border-emerald-100 group hover:bg-emerald-100 transition-all"
-                      >
-                        <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-500 text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                          <MessageCircle size={16} className="md:hidden" />
-                          <MessageCircle size={20} className="hidden md:block" />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="text-[10px] md:text-[11px] font-black uppercase italic text-emerald-700">Suporte WhatsApp</h4>
-                          <p className="text-[8px] md:text-[10px] font-bold text-emerald-600/70 uppercase tracking-widest">Fale conosco agora</p>
-                        </div>
-                        <ChevronRight size={14} className="text-emerald-400" />
-                      </a>
-                    )}
-
-                    {activeNotices.length > 0 ? activeNotices.map(n => (
-                      <div key={n.id} className="p-3 md:p-4 bg-stone-50 rounded-xl md:rounded-2xl space-y-1">
-                        <h4 className="text-[10px] md:text-[11px] font-black uppercase italic text-stone-800">{n.title}</h4>
-                        <p className="text-[9px] md:text-[10px] font-medium text-stone-500 leading-relaxed">{n.content}</p>
-                      </div>
-                    )) : (
-                      <div className="py-6 md:py-8 text-center space-y-2">
-                        <div className="w-10 h-10 md:w-12 md:h-12 bg-stone-50 rounded-full flex items-center justify-center mx-auto text-stone-200"><BellOff size={20}/></div>
-                        <p className="text-[9px] md:text-[10px] font-bold text-stone-300 uppercase tracking-widest">Nenhum aviso no momento</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 md:gap-4 px-3 md:px-4 py-1.5 md:py-2 bg-stone-50 rounded-full border border-stone-100 shadow-sm">
-              <div className="hidden sm:flex flex-col items-end leading-none">
-                <span className="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-stone-400">Bem-vindo(a),</span>
-                <span className="text-[10px] md:text-xs font-black uppercase italic text-stone-800">{user?.name?.split(' ')[0] || 'Aluno(a)'}</span>
               </div>
-              <div className="w-8 h-8 md:w-10 md:h-10 bg-black rounded-full flex items-center justify-center text-white font-black uppercase shadow-md border-2 border-white text-xs md:text-sm" style={{ backgroundColor: theme.secondaryColor }}>{user?.name?.charAt(0)}</div>
+
+              <button 
+                onClick={logout}
+                className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-white/60 backdrop-blur-md text-stone-400 border border-stone-100 shadow-sm hover:bg-red-50 hover:text-red-500 transition-all flex items-center justify-center"
+                title="Sair do Portal"
+              >
+                <LogOut size={18} />
+              </button>
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <Leaf className="text-[#5A6B5D]" size={36} />
+              <h1 className="font-serif font-medium tracking-tight text-3xl md:text-5xl text-stone-800 leading-tight">
+                Cardápio do Bebê Saudável
+              </h1>
+            </div>
+            <p className="text-stone-500 text-xs md:text-sm font-medium tracking-wide ml-12">
+              Guia completo para uma introdução alimentar segura e prática.
+            </p>
           </div>
         </header>
         {children}
       </main>
+      </div>
     </div>
   );
 }
 
 function AdminLayout({ children }: { children?: React.ReactNode }) {
   const navigate = useNavigate();
-  const { theme } = useApp();
+  const { theme, logout } = useApp();
   return (
     <div className="min-h-screen flex flex-col md:flex-row" style={{ backgroundColor: theme.adminBackgroundColor }}>
       {/* Desktop Sidebar */}
@@ -2168,6 +2513,13 @@ function AdminLayout({ children }: { children?: React.ReactNode }) {
             <span className="text-[8px] md:text-[10px] font-black text-stone-300 uppercase tracking-widest leading-none mb-1 md:mb-2">Administrador Master</span>
             <h1 className="text-xl md:text-2xl font-black uppercase italic tracking-tighter" style={{ color: theme.adminPrimaryColor }}>PAINEL ADMIN</h1>
           </div>
+          <button 
+            onClick={logout}
+            className="flex items-center gap-2 px-6 py-3 bg-red-50 text-red-500 rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-red-100 transition-all"
+          >
+            <LogOut size={14} />
+            SAIR
+          </button>
         </header>
         {children}
       </main>
@@ -2175,17 +2527,25 @@ function AdminLayout({ children }: { children?: React.ReactNode }) {
   );
 }
 
+function MainRoutes() {
+  const { user } = useApp();
+  return (
+    <Routes>
+      <Route path="/" element={user ? <Navigate to={user.role === 'admin' ? "/admin" : "/dashboard"} /> : <LoginView />} />
+      <Route path="/nova-senha" element={<ResetPasswordView />} />
+      <Route path="/dashboard" element={<ProtectedRoute><Layout><DashboardView /></Layout></ProtectedRoute>} />
+      <Route path="/viewer/:id" element={<ProtectedRoute><PDFViewerView /></ProtectedRoute>} />
+      <Route path="/admin" element={<AdminRoute><AdminLayout><AdminView /></AdminLayout></AdminRoute>} />
+      <Route path="*" element={<Navigate to="/" />} />
+    </Routes>
+  );
+}
+
 export default function App() {
   return (
     <HashRouter>
       <AppProvider>
-        <Routes>
-          <Route path="/" element={<LoginView />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Layout><DashboardView /></Layout></ProtectedRoute>} />
-          <Route path="/viewer/:id" element={<ProtectedRoute><PDFViewerView /></ProtectedRoute>} />
-          <Route path="/admin" element={<AdminRoute><AdminLayout><AdminView /></AdminLayout></AdminRoute>} />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
+        <MainRoutes />
       </AppProvider>
     </HashRouter>
   );

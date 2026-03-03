@@ -48,8 +48,8 @@ export const INITIAL_PRODUCTS: Product[] = [
 export const INITIAL_BANNERS: PromotionBanner[] = [
   {
     id: 'banner-initial-1',
-    desktopImageUrl: 'https://picsum.photos/seed/banner1/1920/640',
-    mobileImageUrl: 'https://picsum.photos/seed/banner1m/800/400',
+    desktopImageUrl: 'https://picsum.photos/seed/babyfood1/1920/640',
+    mobileImageUrl: 'https://picsum.photos/seed/babyfood1m/800/400',
     title: 'NUTRIÇÃO QUE TRANSFORMA',
     subtitle: 'Descubra o poder da alimentação natural para seu bebê.',
     linkUrl: 'https://www.appcardapiodobebe.com/guia',
@@ -58,18 +58,19 @@ export const INITIAL_BANNERS: PromotionBanner[] = [
   },
   {
     id: 'banner-initial-2',
-    desktopImageUrl: 'https://picsum.photos/seed/banner2/1920/640',
-    mobileImageUrl: 'https://picsum.photos/seed/banner2m/800/400',
+    desktopImageUrl: 'https://picsum.photos/seed/babyfood2/1920/640',
+    mobileImageUrl: 'https://picsum.photos/seed/babyfood2m/800/400',
     title: 'RECEITAS EXCLUSIVAS',
     subtitle: 'Novos cardápios detox para pais e bebês.',
     linkUrl: 'https://pay.hotmart.com/example',
     active: true,
-    order: 2
+    order: 2,
+    isLocked: true // Demonstrando o bloqueio com cadeado
   },
   {
     id: 'banner-initial-3',
-    desktopImageUrl: 'https://picsum.photos/seed/banner3/1920/640',
-    mobileImageUrl: 'https://picsum.photos/seed/banner3m/800/400',
+    desktopImageUrl: 'https://picsum.photos/seed/babyfood3/1920/640',
+    mobileImageUrl: 'https://picsum.photos/seed/babyfood3m/800/400',
     title: 'CONTEÚDO VIP',
     subtitle: 'Acesse nossa comunidade exclusiva de alunos(as).',
     linkUrl: 'https://wa.me/example',
@@ -130,13 +131,15 @@ export const DEFAULT_THEME: ThemeSettings = {
   bannerGradientEnd: '#FF8A00',
   logoType: 'text',
   logoImageUrl: '',
+  logoTextTop: 'Cardápio do',
+  logoTextBottom: 'Bebê',
   loginTagline: 'NUTRIÇÃO QUE TRANSFORMA VIDAS',
   loginSubTagline: 'O guia definitivo para pais que buscam o melhor para seus filhos.',
   loginBannerUrl: 'https://picsum.photos/seed/loginbg/1920/1080',
   loginMobileImageUrl: '',
   loginCardBackgroundUrl: '',
   externalSiteUrl: 'https://www.appcardapiodobebe.com',
-  adminEmail: 'josequirinobatistacontato2@gmail.com',
+  adminEmail: 'sertanejopremiercontato@gmail.com',
   hotmartToken: '',
 
   // Suporte WhatsApp
@@ -157,5 +160,6 @@ export const DEFAULT_THEME: ThemeSettings = {
     Category.ALIMENTACAO,
     Category.SUCOS,
     Category.SAUDE
-  ]
+  ],
+  bannerSpeed: 5000
 };

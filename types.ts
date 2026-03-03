@@ -29,6 +29,8 @@ export interface PromotionBanner {
   linkUrl: string;
   active: boolean;
   order: number;
+  productId?: string; // Opcional: vincular a um produto para herdar status de bloqueio
+  isLocked?: boolean;  // Opcional: forçar bloqueio manual do banner
 }
 
 export interface Notice {
@@ -74,6 +76,8 @@ export interface ThemeSettings {
   bannerGradientEnd: string;
   logoType: 'text' | 'image';
   logoImageUrl: string;
+  logoTextTop: string;
+  logoTextBottom: string;
   loginTagline: string;
   loginSubTagline: string;
   loginBannerUrl: string; 
@@ -98,6 +102,9 @@ export interface ThemeSettings {
 
   // Categorias Dinâmicas
   customCategories?: string[];
+
+  // Configurações de Banner
+  bannerSpeed?: number;
 }
 
 export interface Product {
@@ -111,6 +118,7 @@ export interface Product {
   releaseType: ReleaseType;
   releaseDays?: number;
   active: boolean;
+  forceLocked?: boolean;
   
   isBonus?: boolean;       
   parentId?: string;      
