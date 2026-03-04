@@ -517,21 +517,29 @@ function DashboardView() {
                     }}
                   />
                </picture>
-               <div className="absolute inset-0 bg-black/40 flex flex-col justify-center p-10 md:p-20">
-                  <div className="max-w-2xl space-y-4 md:space-y-6">
-                    <h2 className="text-white text-3xl md:text-6xl font-serif font-medium leading-[1.1] drop-shadow-lg">
-                      {banner.title || 'Guia Completo da Introdução Alimentar'}
-                    </h2>
-                    <p className="text-white/95 text-sm md:text-xl font-medium drop-shadow-md tracking-wide">
-                      {banner.subtitle || 'Do 6º mês ao 1º ano com segurança e carinho.'}
-                    </p>
-                    <div className="pt-4 md:pt-6">
-                      <button className="bg-[#5A6B5D] text-white px-8 md:px-10 py-3 md:py-4 rounded-full text-xs md:text-base font-bold flex items-center gap-3 hover:bg-[#4a5a4d] transition-all shadow-xl transform hover:scale-105">
-                        Começar Agora <ChevronRight size={18} />
-                      </button>
+               {(banner.title || banner.subtitle || banner.linkUrl) && (
+                 <div className="absolute inset-0 bg-black/40 flex flex-col justify-center p-10 md:p-20">
+                    <div className="max-w-2xl space-y-4 md:space-y-6">
+                      {banner.title && (
+                        <h2 className="text-white text-3xl md:text-6xl font-serif font-medium leading-[1.1] drop-shadow-lg">
+                          {banner.title}
+                        </h2>
+                      )}
+                      {banner.subtitle && (
+                        <p className="text-white/95 text-sm md:text-xl font-medium drop-shadow-md tracking-wide">
+                          {banner.subtitle}
+                        </p>
+                      )}
+                      {banner.linkUrl && (
+                        <div className="pt-4 md:pt-6">
+                          <button className="bg-[#5A6B5D] text-white px-8 md:px-10 py-3 md:py-4 rounded-full text-xs md:text-base font-bold flex items-center gap-3 hover:bg-[#4a5a4d] transition-all shadow-xl transform hover:scale-105">
+                            Começar Agora <ChevronRight size={18} />
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  </div>
-               </div>
+                 </div>
+               )}
             </a>
           ))}
 
