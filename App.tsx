@@ -200,7 +200,7 @@ const LoginView = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [step, setStep] = useState<'email' | 'password' | 'forgot-password'>('email');
+  const [step, setStep] = useState<'login' | 'forgot-password'>('login');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [passwordError, setPasswordError] = useState('');
@@ -210,41 +210,7 @@ const LoginView = () => {
     return '';
   };
 
-  const handleEmailCheck = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    const eTrim = email.trim().toLowerCase();
-    
-    // Admin bypass
-    if (eTrim === theme.adminEmail.toLowerCase()) {
-      setStep('password');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      // 1. Verificar se o e-mail tem permissão na tabela 'sales'
-      await verificarPermissao(eTrim);
-      
-      // 2. Sempre vai para a tela de senha
-      // O usuário escolhe se vai "Entrar" ou se é "Primeiro Acesso"
-      setStep('password');
-      
-      const client = clients.find(c => c.email.toLowerCase() === eTrim);
-      if (client && isAccessExpired(client)) {
-        notify('Seu acesso expirou. Entre em contato com o suporte.', 'error');
-        setStep('email');
-        setLoading(false);
-        return;
-      }
-    } catch (err: any) {
-      notify(err.message || 'Acesso não autorizado.', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFinalLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     const eTrim = email.trim().toLowerCase();
@@ -290,7 +256,7 @@ const LoginView = () => {
     try {
       await solicitarResetSenha(email.trim().toLowerCase());
       notify('Instruções de recuperação enviadas para o seu e-mail.', 'success');
-      setStep('email');
+      setStep('login');
     } catch (err: any) {
       notify(err.message || 'Erro ao solicitar recuperação de senha.', 'error');
     } finally {
@@ -301,7 +267,10 @@ const LoginView = () => {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row relative overflow-hidden bg-stone-100" style={{ backgroundColor: theme.backgroundColor }}>
       <div className="absolute inset-0 z-0">
-         <img src={theme.loginBannerUrl} className="w-full h-full object-cover opacity-60" alt="Fundo" />
+         <picture className="w-full h-full">
+           <source media="(max-width: 768px)" srcSet={theme.loginMobileImageUrl || theme.loginBannerUrl} />
+           <img src={theme.loginBannerUrl} className="w-full h-full object-cover opacity-60" alt="Fundo" />
+         </picture>
          <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-[2px]"></div>
       </div>
       
@@ -324,44 +293,44 @@ const LoginView = () => {
               <span className="font-black -mt-0.5 text-2xl" style={{ color: theme.secondaryColor }}>Bebê</span>
            </div>
            
-           {step === 'email' ? (
-             <form onSubmit={handleEmailCheck} className="space-y-8">
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">BEM-VINDO(A)!</h2>
-                <div className="space-y-4">
-                   <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" placeholder="E-mail do Pai ou Mãe" />
-                   <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'AVANÇAR'}</button>
+           {step === 'login' ? (
+             <form onSubmit={handleLogin} className="space-y-8">
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-black uppercase italic tracking-tighter" style={{ color: theme.secondaryColor }}>BEM-VINDO(A)!</h2>
+                  <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Insira suas credenciais para continuar sua jornada</p>
                 </div>
-             </form>
-           ) : step === 'forgot-password' ? (
-             <form onSubmit={handleForgotPassword} className="space-y-8">
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">RECUPERAR SENHA</h2>
-                <p className="text-xs font-bold text-stone-400">Enviaremos as instruções para o seu e-mail.</p>
                 <div className="space-y-4">
-                   <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" placeholder="E-mail do Pai ou Mãe" />
-                   <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ENVIAR INSTRUÇÕES'}</button>
-                   <button type="button" onClick={()=>setStep('email')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">VOLTAR PARA O LOGIN</button>
+                   <div className="space-y-1 text-left">
+                     <label className="text-[9px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
+                     <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" placeholder="E-mail do Pai ou Mãe" />
+                   </div>
+                   <div className="space-y-1 text-left">
+                     <label className="text-[9px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>Senha</label>
+                     <div className="relative">
+                       <input type={showPass ? "text" : "password"} required value={password} onChange={e=>{setPassword(e.target.value); setPasswordError('');}} className={`w-full bg-stone-50 p-6 rounded-[30px] border font-bold text-center focus:ring-2 outline-none transition-all ${passwordError ? 'border-red-500 focus:ring-red-500/20' : 'border-stone-100 focus:ring-orange-500/20'}`} placeholder="Sua Senha" />
+                       <button type="button" onClick={()=>setShowPass(!showPass)} className="absolute right-6 top-1/2 -translate-y-1/2 text-stone-300 hover:text-stone-500 transition-colors">{showPass ? <EyeOff size={18}/> : <Eye size={18}/>}</button>
+                     </div>
+                   </div>
+                   {passwordError && <p className="text-[10px] font-bold text-red-500">{passwordError}</p>}
+                   
+                   <div className="flex justify-end px-4">
+                     <button type="button" onClick={()=>setStep('forgot-password')} className="text-[9px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>Esqueceu a senha?</button>
+                   </div>
+
+                   <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ENTRAR AGORA'}</button>
                 </div>
              </form>
            ) : (
-             <form onSubmit={handleFinalLogin} className="space-y-8">
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">
-                  SUA SENHA
-                </h2>
+             <form onSubmit={handleForgotPassword} className="space-y-8">
+                <h2 className="text-2xl font-black uppercase italic tracking-tighter" style={{ color: theme.secondaryColor }}>RECUPERAR SENHA</h2>
+                <p className="text-xs font-bold text-stone-400">Enviaremos as instruções para o seu e-mail.</p>
                 <div className="space-y-4">
-                   <div className="relative">
-                     <input type={showPass ? "text" : "password"} required value={password} onChange={e=>{setPassword(e.target.value); setPasswordError('');}} className={`w-full bg-stone-50 p-6 rounded-[30px] border font-bold text-center focus:ring-2 outline-none transition-all ${passwordError ? 'border-red-500 focus:ring-red-500/20' : 'border-stone-100 focus:ring-orange-500/20'}`} placeholder="Sua Senha" />
-                     <button type="button" onClick={()=>setShowPass(!showPass)} className="absolute right-6 top-1/2 -translate-y-1/2 text-stone-300 hover:text-stone-500 transition-colors">{showPass ? <EyeOff size={18}/> : <Eye size={18}/>}</button>
+                   <div className="space-y-1 text-left">
+                     <label className="text-[9px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
+                     <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" placeholder="E-mail do Pai ou Mãe" />
                    </div>
-                   {passwordError && <p className="text-[10px] font-bold text-red-500">{passwordError}</p>}
-                   <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ENTRAR AGORA'}</button>
-                   <div className="flex flex-col gap-3 pt-2">
-                     {step === 'password' && (
-                       <>
-                          <button type="button" onClick={()=>setStep('forgot-password')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">ESQUECI MINHA SENHA</button>
-                       </>
-                     )}
-                     <button type="button" onClick={()=>setStep('email')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">VOLTAR PARA O E-MAIL</button>
-                   </div>
+                   <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ENVIAR INSTRUÇÕES'}</button>
+                   <button type="button" onClick={()=>setStep('login')} className="text-[9px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>VOLTAR PARA O LOGIN</button>
                 </div>
              </form>
            )}
@@ -496,7 +465,7 @@ function DashboardView() {
       </div>
 
       {activeBanners.length > 0 && (
-        <div className="relative w-full aspect-[2/1] md:aspect-[3/1] rounded-[24px] md:rounded-[32px] overflow-hidden shadow-xl group lg:max-h-[400px] bg-stone-100">
+        <div className="relative w-full aspect-[4/5] md:aspect-[3/1] rounded-[24px] md:rounded-[32px] overflow-hidden shadow-xl group lg:max-h-[450px] bg-stone-100">
           {activeBanners.map((banner, index) => (
             <a 
               key={banner.id || index} 
@@ -506,7 +475,7 @@ function DashboardView() {
               className={`absolute inset-0 transition-all duration-1000 ease-in-out ${index === currentBanner ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-full pointer-events-none'}`}
             >
                <picture className="w-full h-full block">
-                  <source media="(max-width: 768px)" srcSet={banner.mobileImageUrl || banner.desktopImageUrl || 'https://picsum.photos/seed/banner/800/1200'} />
+                  {banner.mobileImageUrl && <source media="(max-width: 768px)" srcSet={banner.mobileImageUrl} />}
                   <img 
                     src={banner.desktopImageUrl || 'https://picsum.photos/seed/banner/1920/600'} 
                     className="w-full h-full object-cover transition-transform duration-10000 group-hover:scale-105" 
@@ -518,22 +487,22 @@ function DashboardView() {
                   />
                </picture>
                {(banner.title || banner.subtitle || banner.linkUrl) && (
-                 <div className="absolute inset-0 bg-black/40 flex flex-col justify-center p-10 md:p-20">
-                    <div className="max-w-2xl space-y-4 md:space-y-6">
+                 <div className="absolute inset-0 bg-black/40 flex flex-col justify-center p-6 md:p-20">
+                    <div className="max-w-2xl space-y-3 md:space-y-6">
                       {banner.title && (
-                        <h2 className="text-white text-3xl md:text-6xl font-serif font-medium leading-[1.1] drop-shadow-lg">
+                        <h2 className="text-white text-2xl md:text-6xl font-serif font-medium leading-[1.1] drop-shadow-lg">
                           {banner.title}
                         </h2>
                       )}
                       {banner.subtitle && (
-                        <p className="text-white/95 text-sm md:text-xl font-medium drop-shadow-md tracking-wide">
+                        <p className="text-white/95 text-xs md:text-xl font-medium drop-shadow-md tracking-wide line-clamp-2 md:line-clamp-none">
                           {banner.subtitle}
                         </p>
                       )}
                       {banner.linkUrl && (
-                        <div className="pt-4 md:pt-6">
-                          <button className="bg-[#5A6B5D] text-white px-8 md:px-10 py-3 md:py-4 rounded-full text-xs md:text-base font-bold flex items-center gap-3 hover:bg-[#4a5a4d] transition-all shadow-xl transform hover:scale-105">
-                            Começar Agora <ChevronRight size={18} />
+                        <div className="pt-2 md:pt-6">
+                          <button className="bg-[#5A6B5D] text-white px-6 md:px-10 py-2.5 md:py-4 rounded-full text-[10px] md:text-base font-bold flex items-center gap-2 md:gap-3 hover:bg-[#4a5a4d] transition-all shadow-xl transform hover:scale-105">
+                            Começar Agora <ChevronRight size={16} className="md:w-[18px] md:h-[18px]" />
                           </button>
                         </div>
                       )}
@@ -545,12 +514,12 @@ function DashboardView() {
 
           {activeBanners.length > 1 && (
             <>
-              <button onClick={(e) => { e.preventDefault(); prevBanner(); }} className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 w-8 h-8 md:w-12 md:h-12 rounded-full bg-white/20 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-white/40">
-                <ChevronLeft size={20} className="md:hidden" />
+              <button onClick={(e) => { e.preventDefault(); prevBanner(); }} className="absolute left-2 md:left-6 top-1/2 -translate-y-1/2 w-8 h-8 md:w-12 md:h-12 rounded-full bg-white/20 backdrop-blur-md text-white flex items-center justify-center md:opacity-0 group-hover:opacity-100 transition-all hover:bg-white/40">
+                <ChevronLeft size={18} className="md:hidden" />
                 <ChevronLeft size={24} className="hidden md:block" />
               </button>
-              <button onClick={(e) => { e.preventDefault(); nextBanner(); }} className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 w-8 h-8 md:w-12 md:h-12 rounded-full bg-white/20 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-white/40">
-                <ChevronRight size={20} className="md:hidden" />
+              <button onClick={(e) => { e.preventDefault(); nextBanner(); }} className="absolute right-2 md:right-6 top-1/2 -translate-y-1/2 w-8 h-8 md:w-12 md:h-12 rounded-full bg-white/20 backdrop-blur-md text-white flex items-center justify-center md:opacity-0 group-hover:opacity-100 transition-all hover:bg-white/40">
+                <ChevronRight size={18} className="md:hidden" />
                 <ChevronRight size={24} className="hidden md:block" />
               </button>
               
