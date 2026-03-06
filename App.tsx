@@ -287,50 +287,64 @@ const LoginView = () => {
            <p className="text-white/70 text-[10px] font-bold uppercase tracking-[0.2em]">{theme.loginSubTagline}</p>
         </div>
 
-        <div className="w-full max-w-md bg-white/95 backdrop-blur-2xl p-10 md:p-16 rounded-[50px] md:rounded-[60px] shadow-2xl border border-white/60 text-center animate-in zoom-in-95 flex flex-col gap-12">
-           <div className="flex flex-col items-center justify-center text-center leading-none select-none">
+        <div className="w-full max-w-[380px] bg-white/20 backdrop-blur-3xl p-8 md:p-10 rounded-[50px] shadow-2xl border border-white/30 text-center animate-in zoom-in-95 flex flex-col gap-8 relative overflow-hidden">
+           {/* Progress Bar */}
+           <div className="absolute top-0 left-0 w-full flex gap-1 p-4 px-8">
+              <div className="h-1 flex-1 bg-orange-500 rounded-full"></div>
+              <div className="h-1 flex-1 bg-white/30 rounded-full"></div>
+              <div className="h-1 flex-1 bg-white/30 rounded-full"></div>
+           </div>
+
+           <div className="flex flex-col items-center justify-center text-center leading-none select-none mt-4">
               <span className="font-bold tracking-tight text-lg" style={{ color: theme.secondaryColor }}>Cardápio do</span>
               <span className="font-black -mt-0.5 text-2xl" style={{ color: theme.secondaryColor }}>Bebê</span>
+              <div className="mt-2 bg-[#5BA525] text-white text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-widest">Saudável</div>
            </div>
            
            {step === 'login' ? (
-             <form onSubmit={handleLogin} className="space-y-8">
+             <form onSubmit={handleLogin} className="space-y-6">
                 <div className="space-y-2">
-                  <h2 className="text-2xl font-black uppercase italic tracking-tighter" style={{ color: theme.secondaryColor }}>BEM-VINDO(A)!</h2>
-                  <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Insira suas credenciais para continuar sua jornada</p>
+                  <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">SEJA BEM-VINDA!</h2>
+                  <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest leading-tight">Insira suas credenciais para continuar</p>
                 </div>
                 <div className="space-y-4">
                    <div className="space-y-1 text-left">
-                     <label className="text-[9px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
-                     <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" placeholder="E-mail do Pai ou Mãe" />
+                     <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
+                     <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 focus:ring-orange-500/20 outline-none transition-all placeholder:text-stone-300" placeholder="E-mail de Aluno" />
                    </div>
                    <div className="space-y-1 text-left">
-                     <label className="text-[9px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>Senha</label>
+                     <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>Senha</label>
                      <div className="relative">
-                       <input type={showPass ? "text" : "password"} required value={password} onChange={e=>{setPassword(e.target.value); setPasswordError('');}} className={`w-full bg-stone-50 p-6 rounded-[30px] border font-bold text-center focus:ring-2 outline-none transition-all ${passwordError ? 'border-red-500 focus:ring-red-500/20' : 'border-stone-100 focus:ring-orange-500/20'}`} placeholder="Sua Senha" />
+                       <input type={showPass ? "text" : "password"} required value={password} onChange={e=>{setPassword(e.target.value); setPasswordError('');}} className={`w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 outline-none transition-all placeholder:text-stone-300 ${passwordError ? 'ring-2 ring-red-500' : 'focus:ring-orange-500/20'}`} placeholder="Sua Senha" />
                        <button type="button" onClick={()=>setShowPass(!showPass)} className="absolute right-6 top-1/2 -translate-y-1/2 text-stone-300 hover:text-stone-500 transition-colors">{showPass ? <EyeOff size={18}/> : <Eye size={18}/>}</button>
                      </div>
                    </div>
                    {passwordError && <p className="text-[10px] font-bold text-red-500">{passwordError}</p>}
                    
                    <div className="flex justify-end px-4">
-                     <button type="button" onClick={()=>setStep('forgot-password')} className="text-[9px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>Esqueceu a senha?</button>
+                     <button type="button" onClick={()=>setStep('forgot-password')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>Esqueceu a senha?</button>
                    </div>
 
-                   <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ENTRAR AGORA'}</button>
+                   <button disabled={loading} type="submit" className="w-full py-5 bg-black text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ACESSAR PORTAL'}</button>
+                </div>
+
+                <div className="pt-4 border-t border-stone-200/20">
+                   <div className="inline-flex items-center gap-2 px-4 py-2 bg-stone-500/10 rounded-full text-[9px] font-black uppercase tracking-widest text-stone-500/60">
+                      <Shield size={12} /> PORTAL SEGURO
+                   </div>
                 </div>
              </form>
            ) : (
-             <form onSubmit={handleForgotPassword} className="space-y-8">
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter" style={{ color: theme.secondaryColor }}>RECUPERAR SENHA</h2>
-                <p className="text-xs font-bold text-stone-400">Enviaremos as instruções para o seu e-mail.</p>
+             <form onSubmit={handleForgotPassword} className="space-y-6">
+                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">RECUPERAR SENHA</h2>
+                <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">Enviaremos as instruções para o seu e-mail.</p>
                 <div className="space-y-4">
                    <div className="space-y-1 text-left">
-                     <label className="text-[9px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
-                     <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" placeholder="E-mail do Pai ou Mãe" />
+                     <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
+                     <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 focus:ring-orange-500/20 outline-none transition-all placeholder:text-stone-300" placeholder="E-mail de Aluno" />
                    </div>
-                   <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ENVIAR INSTRUÇÕES'}</button>
-                   <button type="button" onClick={()=>setStep('login')} className="text-[9px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>VOLTAR PARA O LOGIN</button>
+                   <button disabled={loading} type="submit" className="w-full py-5 bg-black text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ENVIAR INSTRUÇÕES'}</button>
+                   <button type="button" onClick={()=>setStep('login')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>VOLTAR PARA O LOGIN</button>
                 </div>
              </form>
            )}
@@ -525,7 +539,7 @@ function DashboardView() {
               
               <div className="absolute bottom-4 md:bottom-6 left-1/2 -translate-x-1/2 flex gap-1.5 md:gap-2">
                 {activeBanners.map((_, i) => (
-                  <button key={i} onClick={(e) => { e.preventDefault(); setCurrentBanner(i); }} className={`h-1 md:h-1.5 rounded-full transition-all ${i === currentBanner ? 'w-6 md:w-8 bg-white' : 'w-1.5 md:w-2 bg-white/40'}`} />
+                  <button key={i} onClick={(e) => { e.preventDefault(); setCurrentBanner(i); }} className={`h-1.5 rounded-full transition-all ${i === currentBanner ? 'w-6 md:w-8 bg-white' : 'w-1.5 md:w-2 bg-white/40'}`} />
                 ))}
               </div>
             </>
@@ -538,7 +552,7 @@ function DashboardView() {
         <div className="flex-1 h-[1px] bg-stone-200" />
       </div>
 
-      <div className="flex flex-wrap gap-2 md:gap-4 overflow-x-auto pb-2 custom-scrollbar no-scrollbar">
+      <div className="flex flex-nowrap gap-2 md:gap-4 overflow-x-auto pb-4 custom-scrollbar no-scrollbar">
         <button 
           onClick={() => setSelectedCategory(null)}
           className={`px-6 md:px-8 py-3 md:py-4 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${!selectedCategory ? 'text-white shadow-lg' : 'bg-white text-stone-400 border border-stone-100 hover:bg-stone-50'}`}
@@ -637,7 +651,7 @@ function DashboardView() {
                    <span className="text-[7px] md:text-[8px] font-black uppercase tracking-[0.2em] block" style={{ color: theme.primaryColor }}>{p.category}</span>
                    <div className="h-[1px] w-4 bg-stone-100"></div>
                  </div>
-                 <h3 className="text-[10px] md:text-[13px] font-black uppercase italic tracking-tighter leading-tight line-clamp-2 transition-colors group-hover:text-orange-600 drop-shadow-sm">{p.name}</h3>
+                 <h3 className="text-[11px] md:text-[13px] font-black uppercase italic tracking-tighter leading-tight line-clamp-2 transition-colors group-hover:text-orange-600 drop-shadow-sm">{p.name}</h3>
               </div>
             </Link>
           );
@@ -700,13 +714,21 @@ const AdminView = () => {
   return (
     <div className="space-y-12 pb-48">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <h1 className="text-4xl font-black uppercase italic tracking-tighter" style={{ color: theme.adminPrimaryColor }}>Painel <span style={{ color: theme.primaryColor }}>Admin</span></h1>
-        <div className="flex flex-wrap gap-2 bg-white p-2 rounded-[30px] border border-stone-200">
+        <div className="flex items-center justify-between w-full md:w-auto">
+          <h1 className="text-3xl md:text-4xl font-black uppercase italic tracking-tighter" style={{ color: theme.adminPrimaryColor }}>Painel <span style={{ color: theme.primaryColor }}>Admin</span></h1>
+          <button 
+            onClick={logout} 
+            className="md:hidden px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest transition-all bg-white text-red-400 border border-stone-100 shadow-sm flex items-center gap-2"
+          >
+            <LogOut size={12}/> SAIR
+          </button>
+        </div>
+        <div className="flex flex-nowrap gap-2 bg-white p-2 rounded-[30px] border border-stone-200 overflow-x-auto no-scrollbar">
           {tabs.map((tab) => (
             <button 
               key={tab.id} 
               onClick={() => setActiveTab(tab.id as any)} 
-              className={`px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === tab.id ? 'text-white shadow-lg' : 'text-stone-400 hover:text-stone-600'}`}
+              className={`px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === tab.id ? 'text-white shadow-lg' : 'text-stone-400 hover:text-stone-600'}`}
               style={activeTab === tab.id ? { backgroundColor: theme.adminPrimaryColor } : {}}
             >
               {tab.label}
@@ -714,7 +736,7 @@ const AdminView = () => {
           ))}
           <button 
             onClick={logout} 
-            className="px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest transition-all text-red-400 hover:text-red-600 hover:bg-red-50"
+            className="hidden md:block px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest transition-all text-red-400 hover:text-red-600 hover:bg-red-50"
           >
             SAIR
           </button>
@@ -724,13 +746,13 @@ const AdminView = () => {
       {/* CATALOG TAB */}
       {activeTab === 'CATALOG' && (
         <div className="space-y-12 animate-in fade-in">
-           <div className="flex justify-end">
+           <div className="flex justify-center md:justify-end">
               <button 
                 onClick={() => { setEditingProduct({ name: '', category: Category.ALIMENTACAO, releaseType: ReleaseType.IMMEDIATE, coverImage: '', pdfUrl: '', active: true, isBonus: false }); setShowProductForm(true); }} 
-                className="px-8 py-3 text-white rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:scale-105 transition-transform"
+                className="w-full md:w-auto px-10 py-4 text-white rounded-full text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-105 transition-transform"
                 style={{ backgroundColor: theme.adminPrimaryColor }}
               >
-                <Plus size={14}/> NOVO PRODUTO
+                <Plus size={16}/> NOVO PRODUTO
               </button>
            </div>
            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
@@ -757,9 +779,9 @@ const AdminView = () => {
                         </div>
                       </div>
                    </div>
-                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center gap-4 rounded-[40px]">
-                      <button onClick={() => { setEditingProduct(p); setShowProductForm(true); }} className="w-12 h-12 rounded-full bg-white text-orange-500 flex items-center justify-center"><Edit size={20}/></button>
-                      <button onClick={() => deleteProduct(p.id)} className="w-12 h-12 rounded-full bg-white text-red-500 flex items-center justify-center"><Trash2 size={20}/></button>
+                   <div className="absolute inset-0 bg-black/40 md:bg-black/60 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-all flex items-end md:items-center justify-center pb-8 md:pb-0 gap-4 rounded-[40px]">
+                      <button onClick={() => { setEditingProduct(p); setShowProductForm(true); }} className="w-12 h-12 rounded-full bg-white text-orange-500 flex items-center justify-center shadow-2xl active:scale-90 transition-transform"><Edit size={20}/></button>
+                      <button onClick={() => deleteProduct(p.id)} className="w-12 h-12 rounded-full bg-white text-red-500 flex items-center justify-center shadow-2xl active:scale-90 transition-transform"><Trash2 size={20}/></button>
                    </div>
                  </div>
                ))}
@@ -798,9 +820,9 @@ const AdminView = () => {
                           <td className="px-10 py-6"><span className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase ${c.status === 'active' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>{c.status}</span></td>
                           <td className="px-10 py-6 font-bold text-stone-400">{c.purchasedProducts?.length || 0} cursos</td>
                           <td className="px-10 py-6 text-right">
-                             <div className="flex justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all">
-                                <button onClick={() => { setEditingClient(c); setShowClientForm(true); }} className="p-3 bg-stone-100 text-stone-400 rounded-xl hover:bg-orange-500 hover:text-white"><Edit size={16}/></button>
-                                <button onClick={() => deleteClient(c.id)} className="p-3 bg-stone-100 text-stone-400 rounded-xl hover:bg-red-500 hover:text-white"><Trash2 size={16}/></button>
+                             <div className="flex justify-end gap-3 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-all">
+                                <button onClick={() => { setEditingClient(c); setShowClientForm(true); }} className="p-3 bg-stone-100 text-stone-400 rounded-xl hover:bg-orange-500 hover:text-white shadow-xl active:scale-90 transition-all"><Edit size={16}/></button>
+                                <button onClick={() => deleteClient(c.id)} className="p-3 bg-stone-100 text-stone-400 rounded-xl hover:bg-red-500 hover:text-white shadow-xl active:scale-90 transition-all"><Trash2 size={16}/></button>
                              </div>
                           </td>
                        </tr>
@@ -835,9 +857,9 @@ const AdminView = () => {
                           <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">{n.type} • {n.active ? 'Ativo' : 'Inativo'}</p>
                        </div>
                     </div>
-                    <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-all">
-                       <button onClick={() => { setEditingNotice(n); setShowNoticeForm(true); }} className="p-3 bg-stone-50 text-stone-400 rounded-xl hover:bg-orange-500 hover:text-white transition-all"><Edit size={16}/></button>
-                       <button onClick={() => deleteNotice(n.id)} className="p-3 bg-stone-50 text-stone-400 rounded-xl hover:bg-red-500 hover:text-white transition-all"><Trash2 size={16}/></button>
+                    <div className="flex gap-3 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-all">
+                       <button onClick={() => { setEditingNotice(n); setShowNoticeForm(true); }} className="p-3 bg-stone-50 text-stone-400 rounded-xl hover:bg-orange-500 hover:text-white transition-all shadow-xl active:scale-90"><Edit size={16}/></button>
+                       <button onClick={() => deleteNotice(n.id)} className="p-3 bg-stone-50 text-stone-400 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-xl active:scale-90"><Trash2 size={16}/></button>
                     </div>
                  </div>
               ))}
@@ -1322,7 +1344,7 @@ const AdminView = () => {
                       }
                     }}
                     disabled={isSavingTheme}
-                    className={`px-12 py-5 bg-white text-orange-600 rounded-full text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl hover:scale-105 active:scale-95 transition-all ${isSavingTheme ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    className={`w-full md:w-auto px-12 py-5 bg-white text-orange-600 rounded-full text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl hover:scale-105 active:scale-95 transition-all ${isSavingTheme ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     {isSavingTheme ? 'SALVANDO...' : 'SALVAR TODA A IDENTIDADE'}
                   </button>
@@ -1333,8 +1355,8 @@ const AdminView = () => {
       )}
 
       {showProductForm && editingProduct && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-stone-900/60 backdrop-blur-md overflow-y-auto" onClick={(e) => { if(e.target === e.currentTarget) setShowProductForm(false); }}>
-          <div className="bg-white w-full max-w-3xl p-8 md:p-12 rounded-[40px] shadow-2xl space-y-8 my-10 relative" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[300] flex items-start justify-center p-4 md:p-6 bg-stone-900/60 backdrop-blur-md overflow-y-auto" onClick={(e) => { if(e.target === e.currentTarget) setShowProductForm(false); }}>
+          <div className="bg-white w-full max-w-3xl p-6 md:p-12 rounded-[32px] md:rounded-[40px] shadow-2xl space-y-6 md:space-y-8 my-4 md:my-10 relative" onClick={e => e.stopPropagation()}>
               <button onClick={()=>setShowProductForm(false)} className="absolute right-6 top-6 w-10 h-10 rounded-full bg-stone-100 text-stone-500 flex items-center justify-center hover:bg-red-500 hover:text-white transition-all shadow-sm z-10"><X size={20}/></button>
               
               <div className="text-center">
@@ -2440,12 +2462,12 @@ function Layout({ children }: { children?: React.ReactNode }) {
 
           <div className="space-y-1">
             <div className="flex items-center gap-3">
-              <Leaf className="text-[#5A6B5D]" size={36} />
-              <h1 className="font-serif font-medium tracking-tight text-3xl md:text-5xl text-stone-800 leading-tight">
+              <Leaf className="text-[#5A6B5D] shrink-0" size={32} />
+              <h1 className="font-serif font-medium tracking-tight text-2xl md:text-5xl text-stone-800 leading-tight">
                 Cardápio do Bebê Saudável
               </h1>
             </div>
-            <p className="text-stone-500 text-xs md:text-sm font-medium tracking-wide ml-12">
+            <p className="text-stone-500 text-[10px] md:text-sm font-medium tracking-wide ml-11 max-w-[240px] md:max-w-none">
               Guia completo para uma introdução alimentar segura e prática.
             </p>
           </div>
