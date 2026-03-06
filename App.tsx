@@ -2654,35 +2654,7 @@ function PWAWrapper({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Permitir acesso em desenvolvimento para facilitar o trabalho
-  const isDev = window.location.hostname === 'localhost' || window.location.hostname.includes('run.app');
-  
-  if (!isStandalone && !isDev) {
-    return (
-      <div className="min-h-screen bg-[#2E7D32] flex items-center justify-center p-6 text-center text-white font-sans">
-        <div className="max-w-md space-y-6 animate-in fade-in zoom-in duration-700">
-          <div className="w-24 h-24 bg-white/20 rounded-[30px] mx-auto flex items-center justify-center">
-            <SmartphoneIcon size={48} />
-          </div>
-          <h1 className="text-3xl font-black uppercase italic tracking-tighter">Instale o Aplicativo</h1>
-          <p className="text-sm font-bold uppercase tracking-widest leading-relaxed opacity-80">
-            Para garantir sua segurança e a melhor experiência, o acesso ao portal Raízes Natural é exclusivo através do nosso aplicativo oficial.
-          </p>
-          <div className="space-y-4 pt-4">
-            <div className="bg-white/10 p-4 rounded-[20px] text-left">
-              <p className="text-[10px] font-black uppercase tracking-widest mb-2">Como instalar:</p>
-              <ol className="text-[10px] font-bold space-y-2 opacity-90">
-                <li>1. Toque no ícone de compartilhar (iOS) ou nos três pontos (Android).</li>
-                <li>2. Selecione "Adicionar à Tela de Início" ou "Instalar Aplicativo".</li>
-                <li>3. Abra o app pelo ícone criado na sua tela.</li>
-              </ol>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  // Permitir acesso em qualquer ambiente, removendo o bloqueio de instalação
   return <>{children}</>;
 }
 
