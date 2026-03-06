@@ -269,7 +269,7 @@ const LoginView = () => {
       <div className="absolute inset-0 z-0">
          <picture className="w-full h-full">
            <source media="(max-width: 768px)" srcSet={theme.loginMobileImageUrl || theme.loginBannerUrl} />
-           <img src={theme.loginBannerUrl} className="w-full h-full object-cover opacity-60" alt="Fundo" />
+           <img src={theme.loginBannerUrl} className="w-full h-full object-cover opacity-60" alt="Fundo" referrerPolicy="no-referrer" />
          </picture>
          <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-[2px]"></div>
       </div>
@@ -589,12 +589,23 @@ function DashboardView() {
               }}
               className="block group rounded-[24px] md:rounded-[40px] p-2 md:p-3 shadow-sm md:shadow-md transition-all duration-700 hover:-translate-y-2 hover:shadow-2xl overflow-hidden bg-white border border-stone-100 relative"
             >
-              <div className="relative aspect-[3/4] rounded-[18px] md:rounded-[30px] overflow-hidden mb-2 md:mb-4 shadow-inner">
-                <img 
-                  src={p.coverImage} 
-                  className={`w-full h-full object-cover transition-all duration-1000 ${status.isLocked ? 'scale-105 blur-[1px] opacity-80' : 'group-hover:scale-110'}`} 
-                  alt={p.name} 
-                />
+              <div className="relative aspect-[3/4] rounded-[18px] md:rounded-[30px] overflow-hidden mb-2 md:mb-4 shadow-inner bg-stone-50">
+                {p.coverImage ? (
+                  <img 
+                    src={p.coverImage} 
+                    className={`w-full h-full object-cover transition-all duration-1000 ${status.isLocked ? 'scale-105 blur-[1px] opacity-80' : 'group-hover:scale-110'}`} 
+                    alt={p.name} 
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/placeholder/600/800';
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <ImageIcon className="text-stone-200" size={40} />
+                  </div>
+                )}
                 
                 {/* Badges */}
                 <div className="absolute top-3 left-3 flex flex-col gap-2 z-20">
@@ -666,7 +677,7 @@ function DashboardView() {
 // ==========================================
 
 const AdminView = () => {
-  const { products, clients, theme, setTheme, setThemeState, allCategories, saveProduct, deleteProduct, saveClient, deleteClient, notify, banners, saveBanners, notices, saveNotice, deleteNotice, seedTestData, clearAllData, checkDatabase, logout } = useApp();
+  const { products, clients, theme, setTheme, setThemeState, allCategories, saveProduct, deleteProduct, saveClient, deleteClient, notify, banners, saveBanners, notices, saveNotice, deleteNotice, seedTestData, clearAllData, checkDatabase, logout, refreshData } = useApp();
   const [activeTab, setActiveTab] = useState<'CATALOG' | 'CLIENTS' | 'NOTICES' | 'BANNERS' | 'SUPPORT' | 'INTEGRATION' | 'BRANDING'>('CATALOG');
   
   const [dbStatus, setDbStatus] = useState<Record<string, boolean>>({});
@@ -759,7 +770,22 @@ const AdminView = () => {
               {products.map(p => (
                 <div key={p.id} className="bg-white rounded-[40px] p-6 border border-stone-100 shadow-sm group relative">
                    <div className="aspect-[3/4] rounded-[30px] overflow-hidden mb-4 bg-stone-50">
-                      <img src={p.coverImage} className="w-full h-full object-cover" alt={p.name} />
+                       {p.coverImage ? (
+                         <img 
+                           src={p.coverImage} 
+                           className="w-full h-full object-cover" 
+                           alt={p.name} 
+                           loading="lazy"
+                           referrerPolicy="no-referrer"
+                           onError={(e) => {
+                             (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/placeholder/600/800';
+                           }}
+                         />
+                       ) : (
+                         <div className="w-full h-full flex items-center justify-center">
+                           <ImageIcon className="text-stone-200" size={32} />
+                         </div>
+                       )}
                    </div>
                    <div className="text-center space-y-1">
                       <h4 className="font-black uppercase italic text-[10px] text-stone-800">{p.name}</h4>
@@ -934,8 +960,24 @@ const AdminView = () => {
                         <label className="text-[9px] font-black uppercase tracking-widest text-stone-300 px-4">IMAGEM DESKTOP (URL)</label>
                         <input value={banner.desktopImageUrl} onChange={e=>{ const next = [...localBanners]; next[index].desktopImageUrl = e.target.value; setLocalBanners(next); }} placeholder="https://..." className="w-full p-4 bg-stone-50 rounded-[20px] font-bold text-xs outline-none focus:ring-2 focus:ring-orange-500/10" />
                         {banner.desktopImageUrl && (
-                          <div className="mt-4 rounded-[20px] overflow-hidden border border-stone-100 aspect-[3/1] bg-stone-50">
-                            <img src={banner.desktopImageUrl} className="w-full h-full object-cover" alt="Preview Desktop" referrerPolicy="no-referrer" />
+                          <div className="mt-4 rounded-[20px] overflow-hidden border border-stone-100 aspect-[3/1] bg-stone-50 relative">
+                            <img 
+                              src={banner.desktopImageUrl} 
+                              className="w-full h-full object-cover" 
+                              alt="Preview Desktop" 
+                              referrerPolicy="no-referrer" 
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                target.style.display = 'none';
+                                const parent = target.parentElement;
+                                if (parent && !parent.querySelector('.error-msg')) {
+                                  const errorMsg = document.createElement('div');
+                                  errorMsg.className = "error-msg absolute inset-0 flex flex-col items-center justify-center text-red-400 gap-2 bg-red-50";
+                                  errorMsg.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><span class="text-[8px] font-black uppercase tracking-widest">Link Quebrado</span>';
+                                  parent.appendChild(errorMsg);
+                                }
+                              }}
+                            />
                           </div>
                         )}
                       </div>
@@ -943,8 +985,24 @@ const AdminView = () => {
                         <label className="text-[9px] font-black uppercase tracking-widest text-stone-300 px-4">IMAGEM MOBILE (URL)</label>
                         <input value={banner.mobileImageUrl} onChange={e=>{ const next = [...localBanners]; next[index].mobileImageUrl = e.target.value; setLocalBanners(next); }} placeholder="https://..." className="w-full p-4 bg-stone-50 rounded-[20px] font-bold text-xs outline-none focus:ring-2 focus:ring-orange-500/10" />
                         {banner.mobileImageUrl && (
-                          <div className="mt-4 rounded-[20px] overflow-hidden border border-stone-100 aspect-[2/3] w-24 bg-stone-50">
-                            <img src={banner.mobileImageUrl} className="w-full h-full object-cover" alt="Preview Mobile" referrerPolicy="no-referrer" />
+                          <div className="mt-4 rounded-[20px] overflow-hidden border border-stone-100 aspect-[2/3] w-24 bg-stone-50 relative">
+                            <img 
+                              src={banner.mobileImageUrl} 
+                              className="w-full h-full object-cover" 
+                              alt="Preview Mobile" 
+                              referrerPolicy="no-referrer" 
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                target.style.display = 'none';
+                                const parent = target.parentElement;
+                                if (parent && !parent.querySelector('.error-msg')) {
+                                  const errorMsg = document.createElement('div');
+                                  errorMsg.className = "error-msg absolute inset-0 flex flex-col items-center justify-center text-red-400 gap-2 bg-red-50";
+                                  errorMsg.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+                                  parent.appendChild(errorMsg);
+                                }
+                              }}
+                            />
                           </div>
                         )}
                       </div>
@@ -967,7 +1025,7 @@ const AdminView = () => {
                         </div>
                         <div className="relative aspect-[3/1] rounded-[40px] overflow-hidden bg-stone-50 border border-stone-100 flex items-center justify-center shadow-inner group-hover:scale-[1.01] transition-transform">
                            {banner.desktopImageUrl ? (
-                             <img src={banner.desktopImageUrl} className="w-full h-full object-cover" alt="Preview" />
+                             <img src={banner.desktopImageUrl} className="w-full h-full object-cover" alt="Preview" referrerPolicy="no-referrer" />
                            ) : (
                              <div className="flex flex-col items-center gap-3 text-stone-200">
                                <ImageIcon size={40} strokeWidth={1}/>
@@ -984,14 +1042,25 @@ const AdminView = () => {
            <div className="fixed bottom-24 md:bottom-10 left-6 md:left-[132px] right-6 md:right-12 z-[250]">
               <button 
                 onClick={async () => { 
-                  await saveBanners(localBanners); 
-                  await setTheme();
-                  notify('Banners e configurações salvos!', 'success'); 
+                  setIsSavingTheme(true);
+                  try {
+                    await saveBanners(localBanners); 
+                    const { error } = await supabase.from('settings').upsert({ key: 'theme', value: theme }, { onConflict: 'key' });
+                    if (error) throw error;
+                    await refreshData();
+                    notify('Todas as alterações foram salvas com sucesso!', 'success'); 
+                  } catch (err: any) {
+                    notify(`Erro ao salvar: ${err.message}`, 'error');
+                  } finally {
+                    setIsSavingTheme(false);
+                  }
                 }} 
-                className="w-full py-6 text-white rounded-[30px] font-black text-[10px] uppercase tracking-[0.4em] shadow-2xl flex items-center justify-center gap-4 hover:scale-[1.02] transition-all transform"
+                disabled={isSavingTheme}
+                className="w-full py-6 text-white rounded-[30px] font-black text-[10px] uppercase tracking-[0.4em] shadow-2xl flex items-center justify-center gap-4 hover:scale-[1.02] transition-all transform disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: theme.adminPrimaryColor }}
               >
-                <Save size={16}/> SALVAR ALTERAÇÕES DO CARROSSEL
+                {isSavingTheme ? <Loader2 className="animate-spin" size={16}/> : <Save size={16}/>} 
+                {isSavingTheme ? 'SALVANDO...' : 'SALVAR ALTERAÇÕES DO CARROSSEL'}
               </button>
            </div>
         </div>
@@ -1742,7 +1811,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       ]);
       
       if (pRes.data) {
-        setProducts(pRes.data.map(x => (x.data || x.value) as Product));
+        setProducts(pRes.data.map(x => (x.data || x.value || x) as Product).filter(p => p && p.id));
       }
 
       if (sRes.data) {
@@ -2543,11 +2612,78 @@ function MainRoutes() {
 export default function App() {
   return (
     <HashRouter>
-      <AppProvider>
-        <MainRoutes />
-      </AppProvider>
+      <PWAWrapper>
+        <AppProvider>
+          <MainRoutes />
+        </AppProvider>
+      </PWAWrapper>
     </HashRouter>
   );
+}
+
+function PWAWrapper({ children }: { children: React.ReactNode }) {
+  const [isStandalone, setIsStandalone] = useState(true);
+
+  useEffect(() => {
+    const checkStandalone = () => {
+      const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+      setIsStandalone(!!isStandaloneMode);
+    };
+
+    checkStandalone();
+
+    const preventDefault = (e: Event) => e.preventDefault();
+    document.addEventListener("contextmenu", preventDefault);
+    document.addEventListener("copy", preventDefault);
+    document.addEventListener("cut", preventDefault);
+    document.addEventListener("dragstart", preventDefault);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.keyCode === 123) { e.preventDefault(); return false; }
+      if (e.ctrlKey && e.shiftKey && e.keyCode === 73) { e.preventDefault(); return false; }
+      if (e.ctrlKey && e.keyCode === 85) { e.preventDefault(); return false; }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("contextmenu", preventDefault);
+      document.removeEventListener("copy", preventDefault);
+      document.removeEventListener("cut", preventDefault);
+      document.removeEventListener("dragstart", preventDefault);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  // Permitir acesso em desenvolvimento para facilitar o trabalho
+  const isDev = window.location.hostname === 'localhost' || window.location.hostname.includes('run.app');
+  
+  if (!isStandalone && !isDev) {
+    return (
+      <div className="min-h-screen bg-[#2E7D32] flex items-center justify-center p-6 text-center text-white font-sans">
+        <div className="max-w-md space-y-6 animate-in fade-in zoom-in duration-700">
+          <div className="w-24 h-24 bg-white/20 rounded-[30px] mx-auto flex items-center justify-center">
+            <SmartphoneIcon size={48} />
+          </div>
+          <h1 className="text-3xl font-black uppercase italic tracking-tighter">Instale o Aplicativo</h1>
+          <p className="text-sm font-bold uppercase tracking-widest leading-relaxed opacity-80">
+            Para garantir sua segurança e a melhor experiência, o acesso ao portal Raízes Natural é exclusivo através do nosso aplicativo oficial.
+          </p>
+          <div className="space-y-4 pt-4">
+            <div className="bg-white/10 p-4 rounded-[20px] text-left">
+              <p className="text-[10px] font-black uppercase tracking-widest mb-2">Como instalar:</p>
+              <ol className="text-[10px] font-bold space-y-2 opacity-90">
+                <li>1. Toque no ícone de compartilhar (iOS) ou nos três pontos (Android).</li>
+                <li>2. Selecione "Adicionar à Tela de Início" ou "Instalar Aplicativo".</li>
+                <li>3. Abra o app pelo ícone criado na sua tela.</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
 }
 
 function ProtectedRoute({ children }: { children?: React.ReactNode }) { 

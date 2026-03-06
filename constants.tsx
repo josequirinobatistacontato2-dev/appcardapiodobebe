@@ -100,41 +100,41 @@ export const INITIAL_NOTICES: Notice[] = [
 
 export const DEFAULT_THEME: ThemeSettings = {
   // Área de Membros (Aluno)
-  primaryColor: '#FF7A00',
-  secondaryColor: '#004A8D',
-  accentColor: '#5BA525',
+  primaryColor: '#2E7D32',
+  secondaryColor: '#1B5E20',
+  accentColor: '#81C784',
   backgroundColor: '#fdfbf7',
   sidebarColor: '#ffffff',
   headerColor: '#ffffff',
   textColor: '#1c1917',
-  buttonColor: '#FF7A00',
+  buttonColor: '#2E7D32',
   buttonTextColor: '#ffffff',
   
   // Padrões para novas cores
   welcomeTextColor: '#d6d3d1',
-  headerTitleColor: '#004A8D',
-  headerSubtitleColor: '#004A8D',
+  headerTitleColor: '#1B5E20',
+  headerSubtitleColor: '#1B5E20',
   dashboardTitleColor: '#1c1917',
-
+ 
   // Painel Master (Admin)
-  adminPrimaryColor: '#004A8D',
+  adminPrimaryColor: '#1B5E20',
   adminSecondaryColor: '#ffffff',
   adminBackgroundColor: '#f4f4f5',
   adminSidebarColor: '#ffffff',
   adminHeaderColor: '#ffffff',
   adminTextColor: '#1c1917',
-  adminButtonColor: '#004A8D',
+  adminButtonColor: '#1B5E20',
   adminButtonTextColor: '#ffffff',
-
+ 
   faviconUrl: '',
-  bannerGradientStart: '#FF7A00',
-  bannerGradientEnd: '#FF8A00',
+  bannerGradientStart: '#2E7D32',
+  bannerGradientEnd: '#43A047',
   logoType: 'text',
   logoImageUrl: '',
-  logoTextTop: 'Cardápio do',
-  logoTextBottom: 'Bebê',
-  loginTagline: 'NUTRIÇÃO QUE TRANSFORMA VIDAS',
-  loginSubTagline: 'O guia definitivo para pais que buscam o melhor para seus filhos.',
+  logoTextTop: 'Raízes',
+  logoTextBottom: 'Natural',
+  loginTagline: 'NUTRIÇÃO E SAÚDE NATURAL',
+  loginSubTagline: 'O guia definitivo para uma vida mais saudável e equilibrada.',
   loginBannerUrl: 'https://picsum.photos/seed/loginbg/1920/1080',
   loginMobileImageUrl: '',
   loginCardBackgroundUrl: '',
