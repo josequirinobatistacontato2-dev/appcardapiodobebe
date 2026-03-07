@@ -195,20 +195,14 @@ const useApp = () => {
 // ==========================================
 
 const LoginView = () => {
-  const { setUser, clients, theme, notify, refreshData, saveClient, signIn, signUp } = useApp();
+  const { setUser, theme, notify, signIn } = useApp();
   const navigate = useNavigate();
-  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [step, setStep] = useState<'login' | 'forgot-password'>('login');
+  const [step, setStep] = useState<'login' | 'first-access' | 'forgot-password'>('login');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [passwordError, setPasswordError] = useState('');
-
-  const validatePassword = (pass: string) => {
-    if (pass.length < 6) return 'A senha deve ter pelo menos 6 caracteres.';
-    return '';
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -255,7 +249,7 @@ const LoginView = () => {
     setLoading(true);
     try {
       await solicitarResetSenha(email.trim().toLowerCase());
-      notify('Instruções de recuperação enviadas para o seu e-mail.', 'success');
+      notify('Instruções enviadas para o seu e-mail.', 'success');
       setStep('login');
     } catch (err: any) {
       notify(err.message || 'Erro ao solicitar recuperação de senha.', 'error');
@@ -321,7 +315,8 @@ const LoginView = () => {
                    </div>
                    {passwordError && <p className="text-[10px] font-bold text-red-500">{passwordError}</p>}
                    
-                   <div className="flex justify-end px-4">
+                   <div className="flex justify-between px-4">
+                     <button type="button" onClick={()=>setStep('first-access')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>Primeiro Acesso</button>
                      <button type="button" onClick={()=>setStep('forgot-password')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>Esqueceu a senha?</button>
                    </div>
 
@@ -336,14 +331,22 @@ const LoginView = () => {
              </form>
            ) : (
              <form onSubmit={handleForgotPassword} className="space-y-6">
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">RECUPERAR SENHA</h2>
-                <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">Enviaremos as instruções para o seu e-mail.</p>
+                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">
+                  {step === 'first-access' ? 'PRIMEIRO ACESSO' : 'RECUPERAR SENHA'}
+                </h2>
+                <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">
+                  {step === 'first-access' 
+                    ? 'Digite seu e-mail para criar sua senha de acesso.' 
+                    : 'Enviaremos as instruções para o seu e-mail.'}
+                </p>
                 <div className="space-y-4">
                    <div className="space-y-1 text-left">
                      <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
                      <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 focus:ring-orange-500/20 outline-none transition-all placeholder:text-stone-300" placeholder="E-mail de Aluno" />
                    </div>
-                   <button disabled={loading} type="submit" className="w-full py-5 bg-black text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ENVIAR INSTRUÇÕES'}</button>
+                   <button disabled={loading} type="submit" className="w-full py-5 bg-black text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                     {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (step === 'first-access' ? 'CRIAR SENHA' : 'ENVIAR INSTRUÇÕES')}
+                   </button>
                    <button type="button" onClick={()=>setStep('login')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>VOLTAR PARA O LOGIN</button>
                 </div>
              </form>

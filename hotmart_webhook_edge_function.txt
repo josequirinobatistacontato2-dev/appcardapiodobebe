@@ -1,0 +1,131 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+/**
+ * EDGE FUNCTION: hotmart-webhook
+ * 
+ * Esta função deve ser implantada no Supabase Edge Functions.
+ * Ela recebe o webhook da Hotmart, cria o usuário no Auth (sem senha)
+ * e registra a venda na tabela 'sales'.
+ */
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+
+const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!)
+
+Deno.serve(async (req) => {
+  try {
+    // Hotmart envia um POST com JSON
+    const payload = await req.json()
+    console.log('Webhook recebido:', JSON.stringify(payload, null, 2))
+
+    // 1. Capturar e-mail de vários formatos possíveis
+    const email = payload.data?.buyer?.email || 
+                  payload.data?.subscriber?.email || 
+                  payload.data?.user?.email || 
+                  payload.buyer?.email
+
+    if (!email) {
+      console.error('E-mail não encontrado no payload')
+      return new Response(JSON.stringify({ error: 'E-mail não encontrado' }), { 
+        status: 200, // Sempre retornar 200 para a Hotmart não tentar reenvio infinito
+        headers: { "Content-Type": "application/json" } 
+      })
+    }
+
+    const cleanEmail = email.trim().toLowerCase()
+    const name = payload.data?.buyer?.name || payload.buyer?.name || 'Aluno'
+    const productId = String(payload.data?.product?.id || payload.product?.id || '')
+    const event = payload.event || payload.data?.event
+
+    // 2. Regras de Status e Expiração
+    let status = 'suspenso'
+    let expiresAt = null
+
+    // Eventos de Aprovação
+    const approvedEvents = [
+      'APPROVED', 
+      'COMPLETE', 
+      'PURCHASE_APPROVED', 
+      'SUBSCRIPTION_RENEWAL_APPROVED'
+    ]
+    
+    // Eventos de Cancelamento/Reembolso
+    const revokedEvents = [
+      'REFUNDED', 
+      'CHARGEBACK', 
+      'CANCELLED', 
+      'PURCHASE_REFUNDED', 
+      'PURCHASE_CHARGEBACK', 
+      'PURCHASE_CANCELED',
+      'SUBSCRIPTION_CANCELLATION'
+    ]
+
+    if (approvedEvents.includes(event)) {
+      status = 'ativo'
+      // Duração padrão: 1 ano (365 dias)
+      const durationDays = 365 
+      const now = new Date()
+      expiresAt = new Date(now.getTime() + (durationDays * 24 * 60 * 60 * 1000)).toISOString()
+    } else if (revokedEvents.includes(event)) {
+      status = 'suspenso'
+    } else {
+      // Outros eventos (ex: boleto gerado) ignoramos mas retornamos 200
+      return new Response(JSON.stringify({ message: 'Evento ignorado' }), { 
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    }
+
+    // 3. Criar usuário no Supabase Auth se não existir
+    // Usamos admin.createUser para garantir que email_confirm seja true
+    const { data: { users }, error: listError } = await supabase.auth.admin.listUsers()
+    
+    if (listError) throw listError
+    
+    const userExists = users.find(u => u.email?.toLowerCase() === cleanEmail)
+
+    if (!userExists) {
+      console.log('Criando novo usuário no Auth:', cleanEmail)
+      const { error: createError } = await supabase.auth.admin.createUser({
+        email: cleanEmail,
+        email_confirm: true,
+        user_metadata: { full_name: name }
+      })
+      if (createError) {
+        console.error('Erro ao criar usuário no Auth:', createError.message)
+      }
+    }
+
+    // 4. Salvar na tabela 'sales'
+    // Se já existir registro para este email e produto, ele atualiza (upsert)
+    const { error: salesError } = await supabase.from('sales').upsert({
+      email: cleanEmail,
+      name: name,
+      product_id: productId,
+      status: status,
+      expires_at: expiresAt,
+      created_at: new Date().toISOString()
+    }, { onConflict: 'email, product_id' })
+
+    if (salesError) {
+      console.error('Erro ao salvar na tabela sales:', salesError.message)
+      throw salesError
+    }
+
+    console.log(`Sucesso: Usuario ${cleanEmail} processado com status ${status}`)
+
+    return new Response(JSON.stringify({ message: 'Processado com sucesso' }), { 
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    })
+
+  } catch (error) {
+    console.error('Erro crítico no Webhook:', error.message)
+    // Sempre retornar 200 para evitar retentativas infinitas da Hotmart em caso de erro lógico
+    return new Response(JSON.stringify({ error: error.message }), { 
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    })
+  }
+})
