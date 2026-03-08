@@ -46,7 +46,7 @@ export const verificarPermissao = async (email: string) => {
  */
 export const solicitarResetSenha = async (email: string) => {
   const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/#/nova-senha`,
+    redirectTo: "https://www.appcardapiodobebe.com/#/nova-senha",
   });
   if (error) throw error;
   return data;

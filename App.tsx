@@ -184,254 +184,22 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
-const useApp = () => {
+export const useApp = () => {
   const context = useContext(AppContext);
   if (!context) throw new Error('useApp deve ser usado dentro de AppProvider');
   return context;
 };
 
+import { Login } from './Login';
+import { NovaSenha } from './NovaSenha';
+
 // ==========================================
 // MÓDULO: ÁREA DE MEMBROS (ALUNO) - AUTH/DASH
 // ==========================================
 
-const LoginView = () => {
-  const { setUser, theme, notify, signIn } = useApp();
-  const navigate = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [step, setStep] = useState<'login' | 'first-access' | 'forgot-password'>('login');
-  const [loading, setLoading] = useState(false);
-  const [showPass, setShowPass] = useState(false);
-  const [passwordError, setPasswordError] = useState('');
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    const eTrim = email.trim().toLowerCase();
-
-    // ADMIN BYPASS: If email matches and password is 'admin123', allow login
-    if (eTrim === theme.adminEmail.toLowerCase() && password === 'admin123') {
-      const adminUser: User = { 
-        id: 'admin', 
-        name: 'Master Admin', 
-        email: eTrim, 
-        role: 'admin', 
-        status: 'active', 
-        accessType: 'lifetime', 
-        startDate: new Date().toISOString(), 
-        purchasedProducts: [] 
-      };
-      setUser(adminUser);
-      localStorage.setItem('bs_auth_user', JSON.stringify(adminUser));
-      navigate('/admin');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      await signIn(eTrim, password);
-      
-      if (eTrim === theme.adminEmail.toLowerCase()) {
-        navigate('/admin');
-      } else {
-        navigate('/dashboard');
-      }
-    } catch (err: any) {
-      console.error('Login error:', err);
-      notify(err.message || 'Erro ao realizar login.', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await solicitarResetSenha(email.trim().toLowerCase());
-      notify('Instruções enviadas para o seu e-mail.', 'success');
-      setStep('login');
-    } catch (err: any) {
-      notify(err.message || 'Erro ao solicitar recuperação de senha.', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex flex-col lg:flex-row relative overflow-hidden bg-stone-100" style={{ backgroundColor: theme.backgroundColor }}>
-      <div className="absolute inset-0 z-0">
-         <picture className="w-full h-full">
-           <source media="(max-width: 768px)" srcSet={theme.loginMobileImageUrl || theme.loginBannerUrl} />
-           <img src={theme.loginBannerUrl} className="w-full h-full object-cover opacity-60" alt="Fundo" referrerPolicy="no-referrer" />
-         </picture>
-         <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-[2px]"></div>
-      </div>
-      
-      {/* Tagline Desktop */}
-      <div className="hidden lg:block absolute left-32 top-[30%] z-20 max-w-2xl space-y-4 animate-in slide-in-from-left-20 duration-1000">
-         <h1 className="text-white text-7xl font-black uppercase italic tracking-tighter leading-none drop-shadow-2xl">{theme.loginTagline}</h1>
-         <div className="bg-black/20 backdrop-blur-md px-6 py-3 rounded-full inline-flex items-center gap-3 text-white font-bold text-xs uppercase tracking-widest"><Sparkles className="text-orange-500" size={16}/> {theme.loginSubTagline}</div>
-      </div>
-
-      <div className="flex-1 flex flex-col lg:flex-row items-center justify-center lg:justify-end lg:pr-32 relative z-10 p-6 gap-10">
-        {/* Tagline Mobile */}
-        <div className="lg:hidden text-center space-y-3 z-20 animate-in fade-in slide-in-from-top-10 duration-1000">
-           <h1 className="text-white text-4xl font-black uppercase italic tracking-tighter leading-none drop-shadow-2xl">{theme.loginTagline}</h1>
-           <p className="text-white/70 text-[10px] font-bold uppercase tracking-[0.2em]">{theme.loginSubTagline}</p>
-        </div>
-
-        <div className="w-full max-w-[380px] bg-white/20 backdrop-blur-3xl p-8 md:p-10 rounded-[50px] shadow-2xl border border-white/30 text-center animate-in zoom-in-95 flex flex-col gap-8 relative overflow-hidden">
-           {/* Progress Bar */}
-           <div className="absolute top-0 left-0 w-full flex gap-1 p-4 px-8">
-              <div className="h-1 flex-1 bg-orange-500 rounded-full"></div>
-              <div className="h-1 flex-1 bg-white/30 rounded-full"></div>
-              <div className="h-1 flex-1 bg-white/30 rounded-full"></div>
-           </div>
-
-           <div className="flex flex-col items-center justify-center text-center leading-none select-none mt-4">
-              <span className="font-bold tracking-tight text-lg" style={{ color: theme.secondaryColor }}>Cardápio do</span>
-              <span className="font-black -mt-0.5 text-2xl" style={{ color: theme.secondaryColor }}>Bebê</span>
-              <div className="mt-2 bg-[#5BA525] text-white text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-widest">Saudável</div>
-           </div>
-           
-           {step === 'login' ? (
-             <form onSubmit={handleLogin} className="space-y-6">
-                <div className="space-y-2">
-                  <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">SEJA BEM-VINDA!</h2>
-                  <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest leading-tight">Insira suas credenciais para continuar</p>
-                </div>
-                <div className="space-y-4">
-                   <div className="space-y-1 text-left">
-                     <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
-                     <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 focus:ring-orange-500/20 outline-none transition-all placeholder:text-stone-300" placeholder="E-mail de Aluno" />
-                   </div>
-                   <div className="space-y-1 text-left">
-                     <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>Senha</label>
-                     <div className="relative">
-                       <input type={showPass ? "text" : "password"} required value={password} onChange={e=>{setPassword(e.target.value); setPasswordError('');}} className={`w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 outline-none transition-all placeholder:text-stone-300 ${passwordError ? 'ring-2 ring-red-500' : 'focus:ring-orange-500/20'}`} placeholder="Sua Senha" />
-                       <button type="button" onClick={()=>setShowPass(!showPass)} className="absolute right-6 top-1/2 -translate-y-1/2 text-stone-300 hover:text-stone-500 transition-colors">{showPass ? <EyeOff size={18}/> : <Eye size={18}/>}</button>
-                     </div>
-                   </div>
-                   {passwordError && <p className="text-[10px] font-bold text-red-500">{passwordError}</p>}
-                   
-                   <div className="flex justify-between px-4">
-                     <button type="button" onClick={()=>setStep('first-access')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>Primeiro Acesso</button>
-                     <button type="button" onClick={()=>setStep('forgot-password')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>Esqueceu a senha?</button>
-                   </div>
-
-                   <button disabled={loading} type="submit" className="w-full py-5 bg-black text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">{loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ACESSAR PORTAL'}</button>
-                </div>
-
-                <div className="pt-4 border-t border-stone-200/20">
-                   <div className="inline-flex items-center gap-2 px-4 py-2 bg-stone-500/10 rounded-full text-[9px] font-black uppercase tracking-widest text-stone-500/60">
-                      <Shield size={12} /> PORTAL SEGURO
-                   </div>
-                </div>
-             </form>
-           ) : (
-             <form onSubmit={handleForgotPassword} className="space-y-6">
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">
-                  {step === 'first-access' ? 'PRIMEIRO ACESSO' : 'RECUPERAR SENHA'}
-                </h2>
-                <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">
-                  {step === 'first-access' 
-                    ? 'Digite seu e-mail para criar sua senha de acesso.' 
-                    : 'Enviaremos as instruções para o seu e-mail.'}
-                </p>
-                <div className="space-y-4">
-                   <div className="space-y-1 text-left">
-                     <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
-                     <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 focus:ring-orange-500/20 outline-none transition-all placeholder:text-stone-300" placeholder="E-mail de Aluno" />
-                   </div>
-                   <button disabled={loading} type="submit" className="w-full py-5 bg-black text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
-                     {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (step === 'first-access' ? 'CRIAR SENHA' : 'ENVIAR INSTRUÇÕES')}
-                   </button>
-                   <button type="button" onClick={()=>setStep('login')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>VOLTAR PARA O LOGIN</button>
-                </div>
-             </form>
-           )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const ResetPasswordView = () => {
-  const { theme, notify } = useApp();
-  const navigate = useNavigate();
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [showPass, setShowPass] = useState(false);
-
-  const handleReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password !== confirmPassword) {
-      notify('As senhas não coincidem.', 'error');
-      return;
-    }
-    if (password.length < 6) {
-      notify('A senha deve ter pelo menos 6 caracteres.', 'error');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await atualizarSenha(password);
-      notify('Senha atualizada com sucesso! Faça login agora.', 'success');
-      navigate('/');
-    } catch (err: any) {
-      notify(err.message || 'Erro ao atualizar senha.', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-stone-100" style={{ backgroundColor: theme.backgroundColor }}>
-      <div className="w-full max-w-md bg-white p-10 md:p-16 rounded-[50px] shadow-2xl border border-white/60 text-center">
-        <form onSubmit={handleReset} className="space-y-8">
-          <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">NOVA SENHA</h2>
-          <p className="text-xs font-bold text-stone-400">Crie uma nova senha segura para o seu acesso.</p>
-          
-          <div className="space-y-4">
-            <div className="relative">
-              <input 
-                type={showPass ? "text" : "password"} 
-                required 
-                value={password} 
-                onChange={e => setPassword(e.target.value)} 
-                className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" 
-                placeholder="Nova Senha" 
-              />
-              <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-6 top-1/2 -translate-y-1/2 text-stone-300 hover:text-stone-500 transition-colors">
-                {showPass ? <EyeOff size={18}/> : <Eye size={18}/>}
-              </button>
-            </div>
-            
-            <input 
-              type={showPass ? "text" : "password"} 
-              required 
-              value={confirmPassword} 
-              onChange={e => setConfirmPassword(e.target.value)} 
-              className="w-full bg-stone-50 p-6 rounded-[30px] border border-stone-100 font-bold text-center focus:ring-2 focus:ring-orange-500/20 outline-none transition-all" 
-              placeholder="Confirmar Nova Senha" 
-            />
-
-            <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>
-              {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ATUALIZAR SENHA'}
-            </button>
-            
-            <button type="button" onClick={() => navigate('/')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">
-              VOLTAR PARA O LOGIN
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
+// ==========================================
+// MÓDULO: ÁREA DE MEMBROS (ALUNO) - DASHBOARD
+// ==========================================
 
 function DashboardView() {
   const { products, user, theme, notices, banners, allCategories } = useApp();
@@ -2602,8 +2370,8 @@ function MainRoutes() {
   const { user } = useApp();
   return (
     <Routes>
-      <Route path="/" element={user ? <Navigate to={user.role === 'admin' ? "/admin" : "/dashboard"} /> : <LoginView />} />
-      <Route path="/nova-senha" element={<ResetPasswordView />} />
+      <Route path="/" element={user ? <Navigate to={user.role === 'admin' ? "/admin" : "/dashboard"} /> : <Login />} />
+      <Route path="/nova-senha" element={<NovaSenha />} />
       <Route path="/dashboard" element={<ProtectedRoute><Layout><DashboardView /></Layout></ProtectedRoute>} />
       <Route path="/viewer/:id" element={<ProtectedRoute><PDFViewerView /></ProtectedRoute>} />
       <Route path="/admin" element={<AdminRoute><AdminLayout><AdminView /></AdminLayout></AdminRoute>} />
