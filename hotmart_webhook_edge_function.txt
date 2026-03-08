@@ -11,7 +11,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!)
+// Cliente Supabase com a Service Role Key para ter permissões de admin (criar usuários)
+const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+})
 
 Deno.serve(async (req) => {
   try {
@@ -19,110 +25,99 @@ Deno.serve(async (req) => {
     const payload = await req.json()
     console.log('Webhook recebido:', JSON.stringify(payload, null, 2))
 
-    // 1. Capturar e-mail de vários formatos possíveis
+    // 1. Capturar e-mail de vários formatos possíveis da Hotmart
     const email = payload.data?.buyer?.email || 
                   payload.data?.subscriber?.email || 
-                  payload.data?.user?.email || 
-                  payload.buyer?.email
+                  payload.buyer?.email ||
+                  payload.data?.user?.email;
 
     if (!email) {
-      console.error('E-mail não encontrado no payload')
+      console.error('E-mail não encontrado no payload enviado pela Hotmart')
       return new Response(JSON.stringify({ error: 'E-mail não encontrado' }), { 
-        status: 200, // Sempre retornar 200 para a Hotmart não tentar reenvio infinito
+        status: 200, 
         headers: { "Content-Type": "application/json" } 
       })
     }
 
     const cleanEmail = email.trim().toLowerCase()
     const name = payload.data?.buyer?.name || payload.buyer?.name || 'Aluno'
-    const productId = String(payload.data?.product?.id || payload.product?.id || '')
-    const event = payload.event || payload.data?.event
+    const productId = String(payload.data?.product?.id || payload.product?.id || payload.data?.product_id || '')
+    const event = (payload.event || payload.data?.event || '').toUpperCase()
 
-    // 2. Regras de Status e Expiração
-    let status = 'suspenso'
+    // 2. Mapeamento de Status conforme solicitado
+    // APPROVED/COMPLETE -> ativo
+    // REFUND/CANCEL -> suspenso
+    let status = 'pendente'
     let expiresAt = null
 
-    // Eventos de Aprovação
-    const approvedEvents = [
-      'APPROVED', 
-      'COMPLETE', 
-      'PURCHASE_APPROVED', 
-      'SUBSCRIPTION_RENEWAL_APPROVED'
-    ]
-    
-    // Eventos de Cancelamento/Reembolso
-    const revokedEvents = [
-      'REFUNDED', 
-      'CHARGEBACK', 
-      'CANCELLED', 
-      'PURCHASE_REFUNDED', 
-      'PURCHASE_CHARGEBACK', 
-      'PURCHASE_CANCELED',
-      'SUBSCRIPTION_CANCELLATION'
-    ]
+    const approvedEvents = ['APPROVED', 'COMPLETE', 'PURCHASE_APPROVED', 'SUBSCRIPTION_RENEWAL_APPROVED']
+    const revokedEvents = ['REFUND', 'CANCEL', 'REFUNDED', 'CHARGEBACK', 'CANCELLED', 'PURCHASE_REFUNDED', 'PURCHASE_CHARGEBACK', 'PURCHASE_CANCELED', 'SUBSCRIPTION_CANCELLATION']
 
     if (approvedEvents.includes(event)) {
       status = 'ativo'
       // Duração padrão: 1 ano (365 dias)
-      const durationDays = 365 
       const now = new Date()
-      expiresAt = new Date(now.getTime() + (durationDays * 24 * 60 * 60 * 1000)).toISOString()
+      expiresAt = new Date(now.getTime() + (365 * 24 * 60 * 60 * 1000)).toISOString()
     } else if (revokedEvents.includes(event)) {
       status = 'suspenso'
     } else {
-      // Outros eventos (ex: boleto gerado) ignoramos mas retornamos 200
-      return new Response(JSON.stringify({ message: 'Evento ignorado' }), { 
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      })
+      // Outros eventos (ex: boleto gerado) apenas registramos ou ignoramos
+      console.log('Evento recebido mas não altera status principal:', event)
     }
 
-    // 3. Criar usuário no Supabase Auth se não existir
-    // Usamos admin.createUser para garantir que email_confirm seja true
-    const { data: { users }, error: listError } = await supabase.auth.admin.listUsers()
+    // 3. Gerenciamento do Usuário no Supabase Auth (ADMIN)
+    console.log('Verificando usuário no Auth:', cleanEmail)
     
-    if (listError) throw listError
-    
-    const userExists = users.find(u => u.email?.toLowerCase() === cleanEmail)
+    // Tentamos criar o usuário diretamente. Se já existir, o Supabase retornará um erro que trataremos.
+    const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
+      email: cleanEmail,
+      email_confirm: true,
+      user_metadata: { full_name: name },
+      // Importante: não definimos password aqui para que ele precise criar no primeiro acesso
+    })
 
-    if (!userExists) {
-      console.log('Criando novo usuário no Auth:', cleanEmail)
-      const { error: createError } = await supabase.auth.admin.createUser({
-        email: cleanEmail,
-        email_confirm: true,
-        user_metadata: { full_name: name }
-      })
-      if (createError) {
-        console.error('Erro ao criar usuário no Auth:', createError.message)
+    if (createError) {
+      // Se o erro for que o usuário já existe, ignoramos e continuamos para atualizar a tabela sales
+      if (createError.message.includes('already registered') || createError.message.includes('already exists')) {
+        console.log('Usuário já existe no Auth, seguindo para atualização de venda.')
+      } else {
+        console.error('Erro ao tentar criar usuário no Auth:', createError.message)
       }
+    } else {
+      console.log('Novo usuário criado com sucesso no Auth:', cleanEmail)
     }
 
-    // 4. Salvar na tabela 'sales'
-    // Se já existir registro para este email e produto, ele atualiza (upsert)
+    // 4. Registrar ou Atualizar na tabela 'sales'
+    // Usamos upsert para garantir que se o registro já existir ele seja atualizado
     const { error: salesError } = await supabase.from('sales').upsert({
       email: cleanEmail,
       name: name,
       product_id: productId,
       status: status,
       expires_at: expiresAt,
-      created_at: new Date().toISOString()
-    }, { onConflict: 'email, product_id' })
+      updated_at: new Date().toISOString()
+    }, { 
+      onConflict: 'email, product_id' // Certifique-se que existe uma constraint única para estas colunas
+    })
 
     if (salesError) {
       console.error('Erro ao salvar na tabela sales:', salesError.message)
-      throw salesError
+      // Mesmo com erro na tabela sales, retornamos 200 para a Hotmart
+    } else {
+      console.log(`Sucesso: Venda processada para ${cleanEmail} com status ${status}`)
     }
 
-    console.log(`Sucesso: Usuario ${cleanEmail} processado com status ${status}`)
-
-    return new Response(JSON.stringify({ message: 'Processado com sucesso' }), { 
+    return new Response(JSON.stringify({ 
+      message: 'Webhook processado', 
+      user_created: !!newUser,
+      status: status 
+    }), { 
       status: 200,
       headers: { "Content-Type": "application/json" }
     })
 
   } catch (error) {
-    console.error('Erro crítico no Webhook:', error.message)
-    // Sempre retornar 200 para evitar retentativas infinitas da Hotmart em caso de erro lógico
+    console.error('Erro crítico no processamento do Webhook:', error.message)
     return new Response(JSON.stringify({ error: error.message }), { 
       status: 200,
       headers: { "Content-Type": "application/json" }

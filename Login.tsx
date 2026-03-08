@@ -58,11 +58,13 @@ export const Login = () => {
     setLoading(true);
     try {
       await solicitarResetSenha(email.trim().toLowerCase());
-      notify('Enviamos um email para você criar ou redefinir sua senha.', 'success');
+      notify('Enviamos um email para você criar ou redefinir sua senha. Verifique também sua caixa de spam.', 'success');
       setStep('login');
     } catch (err: any) {
       console.error('solicitarResetSenha error:', err);
-      notify(err.message || 'Erro ao solicitar recuperação de senha.', 'error');
+      // Se o erro for de permissão (vinda do verificarPermissao), mostramos a mensagem amigável
+      const msg = err.message || 'Erro ao solicitar recuperação de senha.';
+      notify(msg, 'error');
     } finally {
       setLoading(false);
     }

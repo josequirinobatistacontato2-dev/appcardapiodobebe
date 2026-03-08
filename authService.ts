@@ -45,10 +45,21 @@ export const verificarPermissao = async (email: string) => {
  * Solicita o reset de senha por e-mail
  */
 export const solicitarResetSenha = async (email: string) => {
-  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+  const emailLimpo = email.trim().toLowerCase();
+  
+  // 1. Verificar se o usuário tem permissão/existe na tabela sales
+  // Isso evita que o Supabase "finja" que enviou e-mail para quem não é cliente
+  await verificarPermissao(emailLimpo);
+
+  const { data, error } = await supabase.auth.resetPasswordForEmail(emailLimpo, {
     redirectTo: "https://www.appcardapiodobebe.com/#/nova-senha",
   });
-  if (error) throw error;
+  
+  if (error) {
+    console.error('Erro Supabase ao solicitar reset:', error);
+    throw error;
+  }
+  
   return data;
 };
 
