@@ -17,7 +17,47 @@ export const NovaSenha = () => {
   React.useEffect(() => {
     const checkSession = async () => {
       console.log('NovaSenha: Verificando sessão...');
-      const { data: { session } } = await supabase.auth.getSession();
+      
+      // 1. Tenta obter a sessão normalmente
+      let { data: { session } } = await supabase.auth.getSession();
+      
+      // 2. Se não encontrou, tenta extrair os tokens do hash manualmente
+      if (!session) {
+        const hash = window.location.hash;
+        if (hash.includes('access_token=')) {
+          console.log('NovaSenha: Tentando extrair tokens do hash manualmente...');
+          // O hash pode vir como #/nova-senha#access_token=... ou #access_token=...
+          const hashParts = hash.split('#');
+          const tokenPart = hashParts.find(p => p.includes('access_token='));
+          
+          if (tokenPart) {
+            // Limpar o tokenPart de possíveis prefixos de rota
+            const cleanTokenPart = tokenPart.includes('access_token=') 
+              ? tokenPart.substring(tokenPart.indexOf('access_token=')) 
+              : tokenPart;
+
+            const params = new URLSearchParams(cleanTokenPart);
+            const accessToken = params.get('access_token');
+            const refreshToken = params.get('refresh_token');
+            
+            if (accessToken) {
+              try {
+                const { data, error } = await supabase.auth.setSession({
+                  access_token: accessToken,
+                  refresh_token: refreshToken || '',
+                });
+                if (!error && data.session) {
+                  console.log('NovaSenha: Sessão recuperada manualmente!');
+                  session = data.session;
+                }
+              } catch (e) {
+                console.error('Erro ao definir sessão manual:', e);
+              }
+            }
+          }
+        }
+      }
+
       if (session) {
         console.log('NovaSenha: Sessão encontrada para:', session.user.email);
         setSessionReady(true);
@@ -31,8 +71,12 @@ export const NovaSenha = () => {
             setSessionReady(true);
           } else {
             console.warn('NovaSenha: Falha ao obter sessão após retry. Hash atual:', window.location.hash);
+            // Mesmo sem sessão "oficial", se temos tokens no hash, vamos considerar "pronto" para tentar
+            if (window.location.hash.includes('access_token=')) {
+              setSessionReady(true);
+            }
           }
-        }, 1500);
+        }, 1000);
       }
     };
     checkSession();
@@ -41,10 +85,6 @@ export const NovaSenha = () => {
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!sessionReady) {
-      notify('Aguardando validação de segurança... Tente em 2 segundos.', 'error');
-      return;
-    }
     if (password !== confirmPassword) {
       notify('As senhas não coincidem.', 'error');
       return;
@@ -56,11 +96,30 @@ export const NovaSenha = () => {
 
     setLoading(true);
     try {
+      // Antes de atualizar, garante que a sessão está setada se houver tokens no hash
+      if (!sessionReady) {
+        const hash = window.location.hash;
+        const hashParts = hash.split('#');
+        const tokenPart = hashParts.find(p => p.includes('access_token='));
+        if (tokenPart) {
+          const cleanTokenPart = tokenPart.substring(tokenPart.indexOf('access_token='));
+          const params = new URLSearchParams(cleanTokenPart);
+          const accessToken = params.get('access_token');
+          if (accessToken) {
+            await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: params.get('refresh_token') || '',
+            });
+          }
+        }
+      }
+
       await atualizarSenha(password);
-      notify('Senha atualizada com sucesso! Faça login agora.', 'success');
+      notify('Senha criada com sucesso! Você já pode acessar.', 'success');
       navigate('/');
     } catch (err: any) {
-      notify(err.message || 'Erro ao atualizar senha.', 'error');
+      console.error('Erro ao atualizar senha:', err);
+      notify(err.message || 'Erro ao atualizar senha. Tente clicar no link do e-mail novamente.', 'error');
     } finally {
       setLoading(false);
     }
@@ -97,8 +156,8 @@ export const NovaSenha = () => {
               placeholder="Confirmar Nova Senha" 
             />
 
-            <button disabled={loading || !sessionReady} type="submit" className={`w-full py-6 text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl transition-all ${!sessionReady ? 'bg-stone-300 cursor-not-allowed' : 'hover:scale-[1.02] active:scale-95'}`} style={{ backgroundColor: sessionReady ? theme.primaryColor : undefined }}>
-              {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (sessionReady ? 'ATUALIZAR SENHA' : 'VALIDANDO ACESSO...')}
+            <button disabled={loading} type="submit" className="w-full py-6 text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl transition-all hover:scale-[1.02] active:scale-95" style={{ backgroundColor: theme.primaryColor }}>
+              {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'CRIAR SENHA E ACESSAR'}
             </button>
             
             <button type="button" onClick={() => navigate('/')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">
