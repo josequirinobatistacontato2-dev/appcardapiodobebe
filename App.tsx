@@ -1743,6 +1743,14 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       }
       
       const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log('Auth event:', event);
+
+        if (event === 'PASSWORD_RECOVERY') {
+          console.log('Redirecionando para nova-senha...');
+          window.location.hash = '/nova-senha';
+          return;
+        }
+
         if (session?.user) {
           try {
             await verificarStatusAtivo(session.user.email!, theme.adminEmail);

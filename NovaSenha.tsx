@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useApp } from './App';
+import { supabase } from './supabaseClient';
 
 export const NovaSenha = () => {
   const { theme, notify, atualizarSenha } = useApp();
@@ -10,9 +11,32 @@ export const NovaSenha = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+
+  // Verifica se existe uma sessão ativa antes de permitir o reset
+  React.useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        setSessionReady(true);
+      } else {
+        // Se não houver sessão, aguarda um pouco (pode ser delay do Supabase)
+        setTimeout(async () => {
+          const { data: { session: retrySession } } = await supabase.auth.getSession();
+          if (retrySession) setSessionReady(true);
+        }, 1500);
+      }
+    };
+    checkSession();
+  }, []);
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!sessionReady) {
+      notify('Aguardando validação de segurança... Tente em 2 segundos.', 'error');
+      return;
+    }
     if (password !== confirmPassword) {
       notify('As senhas não coincidem.', 'error');
       return;
