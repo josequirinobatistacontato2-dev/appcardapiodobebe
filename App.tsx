@@ -1721,6 +1721,21 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
     const initAuth = async () => {
       setLoading(true);
+
+      // Detectar se é um link de recuperação de senha
+      const currentHash = window.location.hash;
+      const isRecovery = currentHash.includes('type=recovery') || 
+                        currentHash.includes('access_token=');
+      
+      if (isRecovery) {
+        console.log('Detectado link de recuperação no hash:', currentHash);
+        // Se o hash contém os tokens mas não está na rota certa, redireciona preservando os tokens
+        if (!currentHash.includes('#/nova-senha')) {
+          const tokens = currentHash.startsWith('#/') ? currentHash.substring(2) : currentHash.substring(1);
+          window.location.hash = `#/nova-senha#${tokens}`;
+        }
+      }
+
       await loadData();
       
       const { data: { session } } = await supabase.auth.getSession();
@@ -1746,8 +1761,11 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         console.log('Auth event:', event);
 
         if (event === 'PASSWORD_RECOVERY') {
-          console.log('Redirecionando para nova-senha...');
-          window.location.hash = '/nova-senha';
+          console.log('Redirecionando para nova-senha via evento...');
+          // Se já estivermos na rota certa (mesmo com tokens), não faz nada
+          if (!window.location.hash.includes('#/nova-senha')) {
+            window.location.hash = '/nova-senha';
+          }
           return;
         }
 

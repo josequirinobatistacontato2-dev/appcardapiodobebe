@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Loader2, Sparkles, Shield, ChevronRight } from 'lucide-react';
 import { useApp } from './App';
@@ -7,6 +7,17 @@ import { User } from './types';
 export const Login = () => {
   const { setUser, theme, notify, signIn, solicitarResetSenha } = useApp();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Se detectar tokens de recuperação no hash, redireciona para a página de nova senha
+    const hash = window.location.hash;
+    if (hash.includes('type=recovery') || hash.includes('access_token=')) {
+      console.log('Login: Detectado token de recuperação, redirecionando...');
+      // Preservamos o hash original para o Supabase conseguir ler os tokens
+      const tokens = hash.startsWith('#/') ? hash.substring(2) : hash.substring(1);
+      window.location.hash = `#/nova-senha#${tokens}`;
+    }
+  }, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [step, setStep] = useState<'login' | 'first-access' | 'forgot-password'>('login');

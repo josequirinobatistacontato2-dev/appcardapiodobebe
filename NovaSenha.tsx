@@ -16,14 +16,22 @@ export const NovaSenha = () => {
   // Verifica se existe uma sessão ativa antes de permitir o reset
   React.useEffect(() => {
     const checkSession = async () => {
+      console.log('NovaSenha: Verificando sessão...');
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
+        console.log('NovaSenha: Sessão encontrada para:', session.user.email);
         setSessionReady(true);
       } else {
+        console.log('NovaSenha: Nenhuma sessão encontrada no primeiro check.');
         // Se não houver sessão, aguarda um pouco (pode ser delay do Supabase)
         setTimeout(async () => {
           const { data: { session: retrySession } } = await supabase.auth.getSession();
-          if (retrySession) setSessionReady(true);
+          if (retrySession) {
+            console.log('NovaSenha: Sessão encontrada no retry.');
+            setSessionReady(true);
+          } else {
+            console.warn('NovaSenha: Falha ao obter sessão após retry. Hash atual:', window.location.hash);
+          }
         }, 1500);
       }
     };
@@ -89,8 +97,8 @@ export const NovaSenha = () => {
               placeholder="Confirmar Nova Senha" 
             />
 
-            <button disabled={loading} type="submit" className="w-full py-6 bg-black text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all" style={{ backgroundColor: theme.primaryColor }}>
-              {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'ATUALIZAR SENHA'}
+            <button disabled={loading || !sessionReady} type="submit" className={`w-full py-6 text-white rounded-[35px] font-black text-[10px] uppercase tracking-widest shadow-xl transition-all ${!sessionReady ? 'bg-stone-300 cursor-not-allowed' : 'hover:scale-[1.02] active:scale-95'}`} style={{ backgroundColor: sessionReady ? theme.primaryColor : undefined }}>
+              {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (sessionReady ? 'ATUALIZAR SENHA' : 'VALIDANDO ACESSO...')}
             </button>
             
             <button type="button" onClick={() => navigate('/')} className="text-[9px] font-black uppercase tracking-widest text-stone-400 hover:text-orange-500 transition-colors">

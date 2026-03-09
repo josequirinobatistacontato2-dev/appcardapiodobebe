@@ -76,7 +76,7 @@ export const solicitarResetSenha = async (email: string, adminEmail?: string) =>
   await verificarPermissao(emailLimpo, adminEmail);
 
   const { data, error } = await supabase.auth.resetPasswordForEmail(emailLimpo, {
-    redirectTo: `${window.location.origin}/`,
+    redirectTo: `${window.location.origin}/#/nova-senha`,
   });
   
   if (error) {
