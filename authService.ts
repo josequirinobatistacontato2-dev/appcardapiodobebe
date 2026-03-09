@@ -86,9 +86,9 @@ export const atualizarSenha = async (novaSenha: string) => {
 /**
  * Cria uma conta no Supabase Auth se o usuário tiver permissão
  */
-export const criarConta = async (email: string, senha: string, nome?: string) => {
+export const criarConta = async (email: string, senha: string, nome?: string, adminEmail?: string) => {
   // 1. Verificar permissão na tabela sales antes de permitir o cadastro
-  await verificarPermissao(email);
+  await verificarPermissao(email, adminEmail);
 
   // 2. Se passou na verificação, criar no Auth
   const { data, error } = await supabase.auth.signUp({
@@ -108,7 +108,7 @@ export const criarConta = async (email: string, senha: string, nome?: string) =>
 /**
  * Realiza o login e verifica o status logo em seguida
  */
-export const login = async (email: string, senha: string) => {
+export const login = async (email: string, senha: string, adminEmail?: string) => {
   // 1. Tentar login no Auth
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
@@ -119,7 +119,7 @@ export const login = async (email: string, senha: string) => {
 
   // 2. Verificar se o status ainda é ativo após o login
   try {
-    await verificarStatusAtivo(email);
+    await verificarStatusAtivo(email, adminEmail);
   } catch (err: any) {
     // Se não estiver ativo, deslogar imediatamente
     await supabase.auth.signOut();
@@ -133,11 +133,18 @@ export const login = async (email: string, senha: string) => {
  * Verifica se o usuário logado ainda possui status ativo
  * Se estiver suspenso, realiza o logout
  */
-export const verificarStatusAtivo = async (email: string) => {
+export const verificarStatusAtivo = async (email: string, adminEmail?: string) => {
+  const emailLimpo = email.trim().toLowerCase();
+
+  // BYPASS: Se for o e-mail do administrador, permite sempre
+  if (adminEmail && emailLimpo === adminEmail.toLowerCase()) {
+    return true;
+  }
+
   const { data: sales, error } = await supabase
     .from('sales')
     .select('status, expires_at')
-    .eq('email', email.trim().toLowerCase());
+    .eq('email', emailLimpo);
 
   if (error || !sales || sales.length === 0) {
     await supabase.auth.signOut();

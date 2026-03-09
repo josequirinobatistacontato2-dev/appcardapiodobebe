@@ -1591,18 +1591,25 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         
         sRes.data.forEach(sale => {
           const email = sale.email.toLowerCase();
+          const isSaleActive = sale.status === 'ativo';
+          
           if (!clientsMap.has(email)) {
             clientsMap.set(email, {
               id: email,
               name: sale.name || 'Usuário',
               email: email,
               role: 'user',
-              status: sale.status === 'ativo' ? 'active' : 'suspended',
+              status: isSaleActive ? 'active' : 'suspended',
               accessType: '1year',
               startDate: sale.created_at,
               expiryDate: sale.expires_at,
               purchasedProducts: []
             });
+          } else {
+            // Se já existe, atualizamos o status para 'active' se pelo menos UMA venda for ativa
+            if (isSaleActive) {
+              clientsMap.get(email)!.status = 'active';
+            }
           }
           
           if (sale.product_id) {
@@ -1676,7 +1683,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
           try {
-            await verificarStatusAtivo(session.user.email!);
+            await verificarStatusAtivo(session.user.email!, theme.adminEmail);
             await syncUser(session.user.email!);
           } catch (err: any) {
             console.error('Acesso negado no onAuthStateChange:', err.message);
@@ -1724,13 +1731,16 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           purchaseDate: sale.created_at
         }));
 
+      // Determine overall user status (active if any sale is active)
+      const isAnyActive = salesData.some(sale => sale.status === 'ativo');
+
       // Map flat sales data to User object
       const mappedUser: User = {
         id: primaryData.email,
         name: primaryData.name || 'Usuário',
         email: primaryData.email,
         role: 'user',
-        status: primaryData.status === 'ativo' ? 'active' : 'suspended',
+        status: isAnyActive ? 'active' : 'suspended',
         accessType: '1year',
         startDate: primaryData.created_at,
         expiryDate: primaryData.expires_at,
@@ -1885,10 +1895,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       window.location.href = window.location.origin + window.location.pathname + '#/';
     },
     signIn: async (email: string, pass: string) => {
-      await authLogin(email, pass);
+      await authLogin(email, pass, theme.adminEmail);
     },
     solicitarResetSenha: async (email: string) => {
-      await solicitarResetSenha(email);
+      await solicitarResetSenha(email, theme.adminEmail);
     },
     atualizarSenha: async (novaSenha: string) => {
       await atualizarSenha(novaSenha);
