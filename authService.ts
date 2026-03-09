@@ -4,38 +4,47 @@ import { supabase } from './supabaseClient';
  * Verifica se o e-mail tem permissão para acessar o sistema
  * Regra: Deve existir na tabela 'sales' e ter status 'ativo'
  */
-export const verificarPermissao = async (email: string) => {
+export const verificarPermissao = async (email: string, adminEmail?: string) => {
   const emailLimpo = email.trim().toLowerCase();
+  
+  // BYPASS: Se for o e-mail do administrador, permite sempre
+  if (adminEmail && emailLimpo === adminEmail.toLowerCase()) {
+    console.log('Bypass de administrador para:', emailLimpo);
+    return true;
+  }
+
   console.log('Verificando permissão para:', emailLimpo);
 
-  const { data, error } = await supabase
+  // Busca todas as vendas vinculadas a este e-mail
+  const { data: sales, error } = await supabase
     .from('sales')
     .select('status, expires_at')
-    .eq('email', emailLimpo)
-    .maybeSingle();
+    .eq('email', emailLimpo);
 
   if (error) {
     console.error('Erro Supabase ao verificar permissão:', error);
     throw new Error('Erro técnico ao verificar acesso. Tente novamente.');
   }
 
-  if (!data) {
+  if (!sales || sales.length === 0) {
     console.warn('Nenhum registro encontrado na tabela sales para:', emailLimpo);
     throw new Error('E-mail não encontrado na base de compradores. Verifique se sua compra foi aprovada ou se usou o mesmo e-mail da Hotmart.');
   }
 
-  // 1. Verificar se o status é suspenso
-  if (data.status === 'suspenso') {
-    throw new Error('Seu acesso está suspenso. Entre em contato com o suporte.');
-  }
+  // Verifica se pelo menos uma das compras está ativa e não expirada
+  const temAcessoAtivo = sales.some(sale => {
+    const isAtivo = sale.status === 'ativo';
+    const isNotExpired = !sale.expires_at || new Date() <= new Date(sale.expires_at);
+    return isAtivo && isNotExpired;
+  });
 
-  // 2. Verificar se o acesso expirou
-  if (data.expires_at && new Date() > new Date(data.expires_at)) {
-    throw new Error('Seu acesso de 1 ano expirou. Realize uma nova compra para continuar.');
-  }
-
-  if (data.status !== 'ativo') {
-    throw new Error('Acesso não autorizado para este status.');
+  if (!temAcessoAtivo) {
+    // Se encontrou o e-mail mas nenhum está ativo
+    const statusAtual = sales[0].status;
+    if (statusAtual === 'suspenso') {
+      throw new Error('Seu acesso está suspenso. Entre em contato com o suporte.');
+    }
+    throw new Error('Seu acesso expirou ou ainda não foi ativado. Verifique o status na Hotmart.');
   }
 
   return true;
@@ -44,12 +53,12 @@ export const verificarPermissao = async (email: string) => {
 /**
  * Solicita o reset de senha por e-mail
  */
-export const solicitarResetSenha = async (email: string) => {
+export const solicitarResetSenha = async (email: string, adminEmail?: string) => {
   const emailLimpo = email.trim().toLowerCase();
   
   // 1. Verificar se o usuário tem permissão/existe na tabela sales
   // Isso evita que o Supabase "finja" que enviou e-mail para quem não é cliente
-  await verificarPermissao(emailLimpo);
+  await verificarPermissao(emailLimpo, adminEmail);
 
   const { data, error } = await supabase.auth.resetPasswordForEmail(emailLimpo, {
     redirectTo: "https://www.appcardapiodobebe.com/#/nova-senha",
@@ -125,19 +134,26 @@ export const login = async (email: string, senha: string) => {
  * Se estiver suspenso, realiza o logout
  */
 export const verificarStatusAtivo = async (email: string) => {
-  const { data, error } = await supabase
+  const { data: sales, error } = await supabase
     .from('sales')
     .select('status, expires_at')
-    .eq('email', email.trim().toLowerCase())
-    .maybeSingle();
+    .eq('email', email.trim().toLowerCase());
 
-  const isExpired = data?.expires_at && new Date() > new Date(data.expires_at);
-
-  if (error || !data || data.status === 'suspenso' || isExpired) {
+  if (error || !sales || sales.length === 0) {
     await supabase.auth.signOut();
-    const message = isExpired 
-      ? 'Seu acesso expirou.' 
-      : 'Seu acesso foi suspenso ou não foi encontrado.';
+    const message = 'Seu acesso não foi encontrado.';
+    throw new Error(message);
+  }
+
+  const temAcessoAtivo = sales.some(sale => {
+    const isAtivo = sale.status === 'ativo';
+    const isNotExpired = !sale.expires_at || new Date() <= new Date(sale.expires_at);
+    return isAtivo && isNotExpired;
+  });
+
+  if (!temAcessoAtivo) {
+    await supabase.auth.signOut();
+    const message = 'Seu acesso expirou ou foi suspenso.';
     throw new Error(message);
   }
 

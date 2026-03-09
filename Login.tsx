@@ -57,7 +57,7 @@ export const Login = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      await solicitarResetSenha(email.trim().toLowerCase());
+      await solicitarResetSenha(email.trim().toLowerCase(), theme.adminEmail);
       notify('Enviamos um email para você criar ou redefinir sua senha. Verifique também sua caixa de spam.', 'success');
       setStep('login');
     } catch (err: any) {
