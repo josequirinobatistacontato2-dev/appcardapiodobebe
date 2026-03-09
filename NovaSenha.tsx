@@ -13,73 +13,76 @@ export const NovaSenha = () => {
   const [showPass, setShowPass] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
 
-  // Verifica se existe uma sessão ativa antes de permitir o reset
+  // Verifica e estabelece a sessão de segurança ao carregar a página
   React.useEffect(() => {
-    const checkSession = async () => {
-      console.log('NovaSenha: Verificando sessão...');
-      
-      // 1. Tenta obter a sessão normalmente
-      let { data: { session } } = await supabase.auth.getSession();
-      
-      // 2. Se não encontrou, tenta extrair os tokens do hash manualmente
-      if (!session) {
+    const initSession = async () => {
+      try {
+        console.log('NovaSenha: Iniciando validação de segurança...');
+        
+        // 1. Tenta obter sessão existente
+        const { data: { session: existingSession } } = await supabase.auth.getSession();
+        if (existingSession) {
+          console.log('NovaSenha: Sessão já ativa para:', existingSession.user.email);
+          setSessionReady(true);
+          return;
+        }
+
+        // 2. Tenta PKCE Flow (se houver 'code' na URL) - Conforme solicitado pelo usuário
+        const url = new URL(window.location.href.replace('#/', '/'));
+        const code = url.searchParams.get('code');
+        if (code) {
+          console.log('NovaSenha: Detectado código PKCE, trocando por sessão...');
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (!error && data.session) {
+            console.log('NovaSenha: Sessão PKCE estabelecida!');
+            setSessionReady(true);
+            return;
+          }
+        }
+
+        // 3. Tenta Implicit Flow (se houver 'access_token' no hash) - Comum em HashRouter
         const hash = window.location.hash;
         if (hash.includes('access_token=')) {
-          console.log('NovaSenha: Tentando extrair tokens do hash manualmente...');
-          // O hash pode vir como #/nova-senha#access_token=... ou #access_token=...
-          const hashParts = hash.split('#');
-          const tokenPart = hashParts.find(p => p.includes('access_token='));
+          console.log('NovaSenha: Detectado token no hash, processando...');
+          // Extrai a parte dos tokens (pode estar após um segundo #)
+          const tokenPart = hash.includes('#access_token=') 
+            ? hash.split('#access_token=')[1] 
+            : (hash.includes('access_token=') ? hash.split('access_token=')[1] : '');
           
           if (tokenPart) {
-            // Limpar o tokenPart de possíveis prefixos de rota
-            const cleanTokenPart = tokenPart.includes('access_token=') 
-              ? tokenPart.substring(tokenPart.indexOf('access_token=')) 
-              : tokenPart;
-
-            const params = new URLSearchParams(cleanTokenPart);
+            const params = new URLSearchParams('access_token=' + tokenPart);
             const accessToken = params.get('access_token');
             const refreshToken = params.get('refresh_token');
             
             if (accessToken) {
-              try {
-                const { data, error } = await supabase.auth.setSession({
-                  access_token: accessToken,
-                  refresh_token: refreshToken || '',
-                });
-                if (!error && data.session) {
-                  console.log('NovaSenha: Sessão recuperada manualmente!');
-                  session = data.session;
-                }
-              } catch (e) {
-                console.error('Erro ao definir sessão manual:', e);
+              const { data, error } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken || '',
+              });
+              if (!error && data.session) {
+                console.log('NovaSenha: Sessão via hash estabelecida!');
+                setSessionReady(true);
+                return;
               }
             }
           }
         }
-      }
 
-      if (session) {
-        console.log('NovaSenha: Sessão encontrada para:', session.user.email);
-        setSessionReady(true);
-      } else {
-        console.log('NovaSenha: Nenhuma sessão encontrada no primeiro check.');
-        // Se não houver sessão, aguarda um pouco (pode ser delay do Supabase)
+        console.log('NovaSenha: Nenhuma sessão detectada ainda. Aguardando processamento automático...');
+        // Aguarda um pouco para o Supabase processar automaticamente se for o caso
         setTimeout(async () => {
-          const { data: { session: retrySession } } = await supabase.auth.getSession();
-          if (retrySession) {
-            console.log('NovaSenha: Sessão encontrada no retry.');
+          const { data: { session: finalCheck } } = await supabase.auth.getSession();
+          if (finalCheck) {
             setSessionReady(true);
-          } else {
-            console.warn('NovaSenha: Falha ao obter sessão após retry. Hash atual:', window.location.hash);
-            // Mesmo sem sessão "oficial", se temos tokens no hash, vamos considerar "pronto" para tentar
-            if (window.location.hash.includes('access_token=')) {
-              setSessionReady(true);
-            }
           }
-        }, 1000);
+        }, 2000);
+
+      } catch (err) {
+        console.error('Erro na inicialização da sessão:', err);
       }
     };
-    checkSession();
+
+    initSession();
   }, []);
 
   const handleReset = async (e: React.FormEvent) => {
@@ -96,30 +99,33 @@ export const NovaSenha = () => {
 
     setLoading(true);
     try {
-      // Antes de atualizar, garante que a sessão está setada se houver tokens no hash
-      if (!sessionReady) {
-        const hash = window.location.hash;
-        const hashParts = hash.split('#');
-        const tokenPart = hashParts.find(p => p.includes('access_token='));
-        if (tokenPart) {
-          const cleanTokenPart = tokenPart.substring(tokenPart.indexOf('access_token='));
-          const params = new URLSearchParams(cleanTokenPart);
-          const accessToken = params.get('access_token');
-          if (accessToken) {
-            await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: params.get('refresh_token') || '',
-            });
-          }
-        }
+      console.log('NovaSenha: Tentando atualizar senha...');
+      
+      // Garantia final: tenta pegar a sessão antes do update
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error('Sessão de segurança não encontrada. Por favor, clique no link do e-mail novamente.');
       }
 
-      await atualizarSenha(password);
-      notify('Senha criada com sucesso! Você já pode acessar.', 'success');
-      navigate('/');
+      const { error } = await supabase.auth.updateUser({
+        password: password,
+      });
+      
+      if (error) throw error;
+
+      notify('Senha criada com sucesso! Redirecionando...', 'success');
+      
+      // Limpa o hash para evitar re-processamento
+      window.location.hash = '#/';
+      
+      setTimeout(() => {
+        navigate('/');
+      }, 2000);
+
     } catch (err: any) {
       console.error('Erro ao atualizar senha:', err);
-      notify(err.message || 'Erro ao atualizar senha. Tente clicar no link do e-mail novamente.', 'error');
+      notify(err.message || 'Erro ao atualizar senha. Tente novamente.', 'error');
     } finally {
       setLoading(false);
     }
