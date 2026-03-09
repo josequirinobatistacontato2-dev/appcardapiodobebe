@@ -940,9 +940,71 @@ const AdminView = () => {
                   />
                   
                   <button 
-                    onClick={() => {
+                    onClick={async () => {
                       if(!simulatedJson) return notify('Cole um JSON válido.', 'error');
-                      notify('Simulação enviada!', 'success');
+                      try {
+                        const payload = JSON.parse(simulatedJson);
+                        
+                        // Tenta chamar o webhook via Supabase Client (mais seguro com headers)
+                        const { data, error } = await supabase.functions.invoke('webhook', {
+                          body: payload
+                        });
+
+                        if (error) {
+                           console.warn('Erro no webhook, tentando inserção direta...', error);
+                           // Se o webhook falhar (ex: CORS ou rede), tentamos inserir direto na tabela sales
+                           const email = (payload.data?.buyer?.email || payload.data?.subscriber?.email || payload.buyer?.email || payload.data?.email || payload.data?.user?.email || "").trim().toLowerCase();
+                           const name = payload.data?.buyer?.name || payload.data?.subscriber?.name || payload.buyer?.name || payload.data?.name || "Aluno Teste";
+                           const product_id = String(payload.data?.product?.id || payload.product?.id || "0");
+                           
+                           if (!email) throw new Error('E-mail não encontrado no JSON para inserção direta');
+
+                           // Tenta descobrir as colunas reais buscando um registro
+                           const { data: sample } = await supabase.from('sales').select('*').limit(1);
+                           const hasHyphenEmail = sample && sample.length > 0 && 'e-mail' in sample[0];
+                           const hasNome = sample && sample.length > 0 && 'nome' in sample[0];
+                           const hasIdProduto = sample && sample.length > 0 && 'id_do_produto' in sample[0];
+
+                           const hasUpdatedAt = sample && sample.length > 0 && 'updated_at' in sample[0];
+
+                           const upsertData: any = {
+                             [hasHyphenEmail ? 'e-mail' : 'email']: email,
+                             [hasNome ? 'nome' : 'name']: name,
+                             [hasIdProduto ? 'id_do_produto' : 'product_id']: product_id,
+                             status: 'ativo',
+                             [sample && sample.length > 0 && 'criado_em' in sample[0] ? 'criado_em' : 'created_at']: new Date().toISOString(),
+                             [sample && sample.length > 0 && 'expira_em' in sample[0] ? 'expira_em' : 'expires_at']: new Date(Date.now() + 365 * 86400000).toISOString(),
+                           };
+
+                           if (hasUpdatedAt) {
+                             upsertData.updated_at = new Date().toISOString();
+                           }
+
+                           const { error: insertError } = await supabase.from('sales').upsert(upsertData, { 
+                             onConflict: hasHyphenEmail && hasIdProduto ? 'e-mail,id_do_produto' : (hasHyphenEmail ? 'e-mail,product_id' : (hasIdProduto ? 'email,id_do_produto' : 'email,product_id'))
+                           });
+
+                           if (insertError) {
+                             console.warn('Erro no upsert composto, tentando simples...', insertError.message);
+                             // Tenta fallback sem product_id
+                             const { error: fallbackError } = await supabase.from('sales').upsert({
+                               [hasHyphenEmail ? 'e-mail' : 'email']: email,
+                               [hasNome ? 'nome' : 'name']: name,
+                               status: 'ativo',
+                               ...(hasUpdatedAt ? { updated_at: new Date().toISOString() } : {})
+                             }, { onConflict: hasHyphenEmail ? 'e-mail' : 'email' });
+                             
+                             if (fallbackError) throw fallbackError;
+                           }
+                           
+                           notify('Venda liberada via banco de dados!', 'success');
+                        } else {
+                          notify('Simulação processada com sucesso via Webhook!', 'success');
+                        }
+                        await refreshData();
+                      } catch (err: any) {
+                        notify(`Erro na simulação: ${err.message}`, 'error');
+                      }
                     }}
                     className="w-full py-6 bg-black text-white rounded-[30px] font-black text-[10px] uppercase tracking-[0.4em] shadow-xl hover:bg-stone-800 transition-all"
                   >
@@ -1590,19 +1652,19 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         const clientsMap = new Map<string, User>();
         
         sRes.data.forEach(sale => {
-          const email = sale.email.toLowerCase();
+          const email = (sale.email || sale["e-mail"] || "").toLowerCase();
           const isSaleActive = sale.status === 'ativo';
           
           if (!clientsMap.has(email)) {
             clientsMap.set(email, {
               id: email,
-              name: sale.name || 'Usuário',
+              name: sale.name || sale.nome || 'Usuário',
               email: email,
               role: 'user',
               status: isSaleActive ? 'active' : 'suspended',
               accessType: '1year',
-              startDate: sale.created_at,
-              expiryDate: sale.expires_at,
+              startDate: sale.created_at || sale.criado_em,
+              expiryDate: sale.expires_at || sale.expira_em,
               purchasedProducts: []
             });
           } else {
@@ -1612,10 +1674,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             }
           }
           
-          if (sale.product_id) {
+          if (sale.product_id || sale.id_do_produto) {
             clientsMap.get(email)!.purchasedProducts.push({
-              productId: sale.product_id,
-              purchaseDate: sale.created_at
+              productId: sale.product_id || sale.id_do_produto,
+              purchaseDate: sale.created_at || sale.criado_em
             });
           }
         });
@@ -1725,10 +1787,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       
       // Map all sales records to purchasedProducts array
       const purchasedProducts = salesData
-        .filter(sale => sale.product_id)
+        .filter(sale => sale.product_id || sale.id_do_produto)
         .map(sale => ({
-          productId: sale.product_id,
-          purchaseDate: sale.created_at
+          productId: sale.product_id || sale.id_do_produto,
+          purchaseDate: sale.created_at || sale.criado_em
         }));
 
       // Determine overall user status (active if any sale is active)
@@ -1736,14 +1798,14 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
       // Map flat sales data to User object
       const mappedUser: User = {
-        id: primaryData.email,
-        name: primaryData.name || 'Usuário',
-        email: primaryData.email,
+        id: (primaryData.email || primaryData["e-mail"]),
+        name: primaryData.name || primaryData.nome || 'Usuário',
+        email: (primaryData.email || primaryData["e-mail"]),
         role: 'user',
         status: isAnyActive ? 'active' : 'suspended',
         accessType: '1year',
-        startDate: primaryData.created_at,
-        expiryDate: primaryData.expires_at,
+        startDate: primaryData.created_at || primaryData.criado_em,
+        expiryDate: primaryData.expires_at || primaryData.expira_em,
         purchasedProducts: purchasedProducts
       };
       setUser(mappedUser);
@@ -1806,7 +1868,8 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             name: c.name,
             status,
             expires_at: expiryDate,
-            created_at: createdAt
+            created_at: createdAt,
+            product_id: 'VAZIO'
           });
         } else {
           console.log('Inserindo múltiplos registros para produtos:', c.purchasedProducts.length);
@@ -1846,8 +1909,12 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     },
     deleteClient: async (email: string) => { 
       try {
-        const { error } = await supabase.from('sales').delete().eq('email', email); 
-        if (error) throw error;
+        // Tenta deletar usando ambas as colunas possíveis
+        const { error: err1 } = await supabase.from('sales').delete().eq('email', email); 
+        const { error: err2 } = await supabase.from('sales').delete().eq('e-mail', email); 
+        
+        if (err1 && err2) throw err1;
+        
         await loadData(); 
         notify('Cliente removido.', 'success'); 
       } catch (err: any) {

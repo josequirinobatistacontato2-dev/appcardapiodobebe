@@ -16,10 +16,23 @@ export const verificarPermissao = async (email: string, adminEmail?: string) => 
   console.log('Verificando permissão para:', emailLimpo);
 
   // Busca todas as vendas vinculadas a este e-mail
-  const { data: sales, error } = await supabase
+  // Tenta primeiro 'email', depois 'e-mail' se falhar ou não encontrar
+  let { data: sales, error } = await supabase
     .from('sales')
-    .select('status, expires_at')
+    .select('*')
     .eq('email', emailLimpo);
+
+  if (error || !sales || sales.length === 0) {
+    const { data: salesHyphen, error: errorHyphen } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('e-mail', emailLimpo);
+    
+    if (!errorHyphen && salesHyphen && salesHyphen.length > 0) {
+      sales = salesHyphen;
+      error = null;
+    }
+  }
 
   if (error) {
     console.error('Erro Supabase ao verificar permissão:', error);
@@ -33,8 +46,10 @@ export const verificarPermissao = async (email: string, adminEmail?: string) => 
 
   // Verifica se pelo menos uma das compras está ativa e não expirada
   const temAcessoAtivo = sales.some(sale => {
-    const isAtivo = sale.status === 'ativo';
-    const isNotExpired = !sale.expires_at || new Date() <= new Date(sale.expires_at);
+    const status = sale.status;
+    const expiresAt = sale.expires_at || sale.expira_em;
+    const isAtivo = status === 'ativo';
+    const isNotExpired = !expiresAt || new Date() <= new Date(expiresAt);
     return isAtivo && isNotExpired;
   });
 
@@ -61,7 +76,7 @@ export const solicitarResetSenha = async (email: string, adminEmail?: string) =>
   await verificarPermissao(emailLimpo, adminEmail);
 
   const { data, error } = await supabase.auth.resetPasswordForEmail(emailLimpo, {
-    redirectTo: "https://www.appcardapiodobebe.com/#/nova-senha",
+    redirectTo: `${window.location.origin}/#/nova-senha`,
   });
   
   if (error) {
@@ -141,10 +156,22 @@ export const verificarStatusAtivo = async (email: string, adminEmail?: string) =
     return true;
   }
 
-  const { data: sales, error } = await supabase
+  let { data: sales, error } = await supabase
     .from('sales')
-    .select('status, expires_at')
+    .select('*')
     .eq('email', emailLimpo);
+
+  if (error || !sales || sales.length === 0) {
+    const { data: salesHyphen, error: errorHyphen } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('e-mail', emailLimpo);
+    
+    if (!errorHyphen && salesHyphen && salesHyphen.length > 0) {
+      sales = salesHyphen;
+      error = null;
+    }
+  }
 
   if (error || !sales || sales.length === 0) {
     await supabase.auth.signOut();
@@ -153,8 +180,10 @@ export const verificarStatusAtivo = async (email: string, adminEmail?: string) =
   }
 
   const temAcessoAtivo = sales.some(sale => {
-    const isAtivo = sale.status === 'ativo';
-    const isNotExpired = !sale.expires_at || new Date() <= new Date(sale.expires_at);
+    const status = sale.status;
+    const expiresAt = sale.expires_at || sale.expira_em;
+    const isAtivo = status === 'ativo';
+    const isNotExpired = !expiresAt || new Date() <= new Date(expiresAt);
     return isAtivo && isNotExpired;
   });
 
