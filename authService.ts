@@ -76,7 +76,7 @@ export const solicitarResetSenha = async (email: string, adminEmail?: string) =>
   await verificarPermissao(emailLimpo, adminEmail);
 
   const { data, error } = await supabase.auth.resetPasswordForEmail(emailLimpo, {
-    redirectTo: `${window.location.origin}/#/nova-senha`,
+    redirectTo: `${window.location.origin}/nova-senha`,
   });
   
   if (error) {
@@ -99,19 +99,35 @@ export const atualizarSenha = async (novaSenha: string) => {
 };
 
 /**
- * Cria uma conta no Supabase Auth se o usuário tiver permissão
+ * Verifica se o e-mail existe na tabela sales e está apto para o primeiro acesso
  */
-export const criarConta = async (email: string, senha: string, nome?: string, adminEmail?: string) => {
-  // 1. Verificar permissão na tabela sales antes de permitir o cadastro
+export const verificarVendaParaPrimeiroAcesso = async (email: string, adminEmail?: string) => {
+  const emailLimpo = email.trim().toLowerCase();
+  
+  // 1. Verifica permissão básica (já faz as checagens de status e expiração)
+  await verificarPermissao(emailLimpo, adminEmail);
+  
+  // 2. Verifica se o usuário já existe no Auth (opcional, mas útil para saber se é reset ou novo)
+  // Nota: No lado do cliente, não conseguimos listar usuários, então apenas retornamos true
+  // se a venda for válida. O signUp ou signIn tratará o resto.
+  return true;
+};
+
+/**
+ * Realiza o primeiro acesso: Cria a conta no Auth
+ * Se o usuário já existir, o Supabase retornará um erro que trataremos no componente
+ */
+export const concluirPrimeiroAcesso = async (email: string, senha: string, nome?: string, adminEmail?: string) => {
+  // 1. Garante a permissão novamente por segurança
   await verificarPermissao(email, adminEmail);
 
-  // 2. Se passou na verificação, criar no Auth
+  // 2. Cria a conta
   const { data, error } = await supabase.auth.signUp({
-    email,
+    email: email.trim().toLowerCase(),
     password: senha,
     options: {
       data: {
-        full_name: nome,
+        full_name: nome || 'Aluno',
       },
     },
   });

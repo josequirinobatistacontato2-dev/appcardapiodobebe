@@ -5,25 +5,28 @@ import { useApp } from './App';
 import { User } from './types';
 
 export const Login = () => {
-  const { setUser, theme, notify, signIn, solicitarResetSenha } = useApp();
+  const { setUser, theme, notify, signIn, solicitarResetSenha, verificarVendaParaPrimeiroAcesso, concluirPrimeiroAcesso } = useApp();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Se detectar tokens de recuperação no hash, redireciona para a página de nova senha
-    const hash = window.location.hash;
-    if (hash.includes('type=recovery') || hash.includes('access_token=')) {
-      console.log('Login: Detectado token de recuperação, redirecionando...');
-      // Preservamos o hash original para o Supabase conseguir ler os tokens
-      const tokens = hash.startsWith('#/') ? hash.substring(2) : hash.substring(1);
-      window.location.hash = `#/nova-senha#${tokens}`;
-    }
+    // O redirecionamento de recuperação agora é tratado globalmente no App.tsx
   }, []);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [step, setStep] = useState<'login' | 'first-access' | 'forgot-password'>('login');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [step, setStep] = useState<'login' | 'first-access' | 'create-password' | 'forgot-password'>('login');
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [passwordError, setPasswordError] = useState('');
+  const [resetCooldown, setResetCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resetCooldown > 0) {
+      const timer = setTimeout(() => setResetCooldown(resetCooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resetCooldown]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,18 +67,91 @@ export const Login = () => {
     }
   };
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
+  const handleVerifyFirstAccess = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await solicitarResetSenha(email.trim().toLowerCase(), theme.adminEmail);
-      notify('Enviamos um email para você criar ou redefinir sua senha. Verifique também sua caixa de spam.', 'success');
+      const emailLimpo = email.trim().toLowerCase();
+      await verificarVendaParaPrimeiroAcesso(emailLimpo);
+      notify('E-mail validado com sucesso! Agora crie sua senha.', 'success');
+      setStep('create-password');
+    } catch (err: any) {
+      console.error('verificarVendaParaPrimeiroAcesso error:', err);
+      notify(err.message || 'E-mail não encontrado ou sem acesso ativo.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password !== confirmPassword) {
+      notify('As senhas não coincidem.', 'error');
+      return;
+    }
+    if (password.length < 6) {
+      notify('A senha deve ter pelo menos 6 caracteres.', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await concluirPrimeiroAcesso(email, password);
+      notify('Senha criada com sucesso! Agora você pode fazer login.', 'success');
       setStep('login');
+      setPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      console.error('concluirPrimeiroAcesso error:', err);
+      
+      const isAlreadyRegistered = err.message?.toLowerCase().includes('already registered') || 
+                                 err.message?.toLowerCase().includes('already exists');
+
+      if (isAlreadyRegistered) {
+        // Tenta fazer login automaticamente com a senha fornecida
+        try {
+          await signIn(email, password);
+          notify('Você já possuía uma conta e o acesso foi validado!', 'success');
+          if (email.trim().toLowerCase() === theme.adminEmail.toLowerCase()) {
+            navigate('/admin');
+          } else {
+            navigate('/dashboard');
+          }
+          return;
+        } catch (loginErr) {
+          // Se o login falhar, significa que a senha é diferente ou a conta está bloqueada
+          notify('Você já possui uma conta cadastrada com uma senha diferente. Por favor, faça login ou recupere sua senha.', 'warning');
+          setStep('login');
+          setPassword('');
+        }
+      } else {
+        notify(err.message || 'Erro ao criar senha. Tente novamente.', 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (resetCooldown > 0) {
+      notify(`Aguarde ${resetCooldown}s para solicitar novamente.`, 'warning');
+      return;
+    }
+    setLoading(true);
+    try {
+      await solicitarResetSenha(email.trim().toLowerCase());
+      notify('Enviamos um email para você redefinir sua senha. Verifique também sua caixa de spam.', 'success');
+      setStep('login');
+      setResetCooldown(60); // Cooldown de 60s após sucesso para evitar spam
     } catch (err: any) {
       console.error('solicitarResetSenha error:', err);
-      // Se o erro for de permissão (vinda do verificarPermissao), mostramos a mensagem amigável
-      const msg = err.message || 'Erro ao solicitar recuperação de senha.';
-      notify(msg, 'error');
+      if (err.message?.includes('15 seconds')) {
+        notify('Por segurança, aguarde 15 segundos antes de solicitar novamente.', 'warning');
+        setResetCooldown(15);
+      } else {
+        notify(err.message || 'Erro ao solicitar recuperação de senha.', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -136,14 +212,14 @@ export const Login = () => {
                    </div>
                    {passwordError && <p className="text-[11px] font-bold text-red-500 animate-bounce">{passwordError}</p>}
                    
-                   <div className="space-y-3">
+                   <div className="space-y-4 pt-2">
                      <button 
                        type="button" 
                        onClick={()=>setStep('first-access')} 
-                       className="w-full py-5 bg-stone-900 text-white rounded-full font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:bg-black hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                       className="w-full py-5 bg-stone-100 text-stone-800 rounded-full font-black text-[10px] uppercase tracking-[0.2em] shadow-sm hover:bg-stone-200 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 border border-stone-200"
                      >
-                        PRIMEIRO ACESSO
-                        <Sparkles size={16} className="text-orange-500" />
+                        <Sparkles size={14} className="text-orange-500" />
+                        PRIMEIRO ACESSO? CRIE SUA SENHA
                      </button>
 
                      <button disabled={loading} type="submit" className="w-full py-6 bg-stone-900 text-white rounded-full font-black text-sm uppercase tracking-[0.2em] shadow-[0_20px_40px_-10px_rgba(0,0,0,0.3)] hover:bg-black hover:scale-[1.03] active:scale-95 transition-all flex items-center justify-center gap-3">
@@ -168,23 +244,51 @@ export const Login = () => {
                    </div>
                 </div>
              </form>
+           ) : step === 'first-access' ? (
+             <form onSubmit={handleVerifyFirstAccess} className="space-y-6">
+                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">PRIMEIRO ACESSO</h2>
+                <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">Digite o e-mail usado na compra para validar seu acesso.</p>
+                <div className="space-y-4">
+                   <div className="space-y-1 text-left">
+                     <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail da Compra</label>
+                     <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 focus:ring-orange-500/20 outline-none transition-all placeholder:text-stone-300" placeholder="Ex: maria@email.com" />
+                   </div>
+                   <button disabled={loading} type="submit" className="w-full py-5 bg-black text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                     {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'VERIFICAR ACESSO'}
+                   </button>
+                   <button type="button" onClick={()=>setStep('login')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>VOLTAR PARA O LOGIN</button>
+                </div>
+             </form>
+           ) : step === 'create-password' ? (
+             <form onSubmit={handleCreatePassword} className="space-y-6">
+                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">CRIAR SENHA</h2>
+                <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">Defina uma senha para seus próximos acessos.</p>
+                <div className="space-y-4">
+                   <div className="space-y-1 text-left">
+                     <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>Nova Senha</label>
+                     <input type={showPass ? "text" : "password"} required value={password} onChange={e=>setPassword(e.target.value)} className="w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 focus:ring-orange-500/20 outline-none transition-all placeholder:text-stone-300" placeholder="Mínimo 6 caracteres" />
+                   </div>
+                   <div className="space-y-1 text-left">
+                     <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>Confirmar Senha</label>
+                     <input type={showPass ? "text" : "password"} required value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} className="w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 focus:ring-orange-500/20 outline-none transition-all placeholder:text-stone-300" placeholder="Repita a senha" />
+                   </div>
+                   <button disabled={loading} type="submit" className="w-full py-5 bg-orange-500 text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
+                     {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : 'CRIAR SENHA E ACESSAR'}
+                   </button>
+                   <button type="button" onClick={()=>setStep('first-access')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>VOLTAR</button>
+                </div>
+             </form>
            ) : (
              <form onSubmit={handleForgotPassword} className="space-y-6">
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">
-                  {step === 'first-access' ? 'PRIMEIRO ACESSO' : 'RECUPERAR SENHA'}
-                </h2>
-                <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">
-                  {step === 'first-access' 
-                    ? 'Digite seu e-mail para criar sua senha de acesso.' 
-                    : 'Enviaremos as instruções para o seu e-mail.'}
-                </p>
+                <h2 className="text-2xl font-black uppercase italic tracking-tighter text-stone-800">RECUPERAR SENHA</h2>
+                <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest">Enviaremos as instruções para o seu e-mail.</p>
                 <div className="space-y-4">
                    <div className="space-y-1 text-left">
                      <label className="text-[10px] font-black uppercase tracking-widest px-4" style={{ color: theme.secondaryColor }}>E-mail</label>
                      <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} className="w-full bg-white p-5 rounded-full border-none font-bold text-center text-base shadow-lg focus:ring-2 focus:ring-orange-500/20 outline-none transition-all placeholder:text-stone-300" placeholder="E-mail de Aluno" />
                    </div>
-                   <button disabled={loading} type="submit" className="w-full py-5 bg-black text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all">
-                     {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (step === 'first-access' ? 'CRIAR SENHA' : 'ENVIAR INSTRUÇÕES')}
+                   <button disabled={loading || resetCooldown > 0} type="submit" className="w-full py-5 bg-black text-white rounded-full font-black text-xs uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
+                     {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (resetCooldown > 0 ? `AGUARDE ${resetCooldown}s` : 'ENVIAR INSTRUÇÕES')}
                    </button>
                    <button type="button" onClick={()=>setStep('login')} className="text-[10px] font-black uppercase tracking-widest transition-colors" style={{ color: theme.secondaryColor }}>VOLTAR PARA O LOGIN</button>
                 </div>

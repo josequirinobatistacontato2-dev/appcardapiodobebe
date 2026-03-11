@@ -1,8 +1,8 @@
 import React, { useState, createContext, useContext, useRef, useEffect, useMemo, useCallback } from 'react';
-import { HashRouter, Routes, Route, Navigate, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import { supabase } from './supabaseClient';
-import { criarConta, login as authLogin, verificarStatusAtivo, verificarPermissao, solicitarResetSenha, atualizarSenha } from './authService';
+import { verificarVendaParaPrimeiroAcesso, concluirPrimeiroAcesso, login as authLogin, verificarStatusAtivo, verificarPermissao, solicitarResetSenha, atualizarSenha } from './authService';
 import { 
   Plus, 
   Lock, 
@@ -175,6 +175,8 @@ interface AppContextType {
   signIn: (email: string, pass: string) => Promise<void>;
   solicitarResetSenha: (email: string) => Promise<void>;
   atualizarSenha: (novaSenha: string) => Promise<void>;
+  verificarVendaParaPrimeiroAcesso: (email: string) => Promise<boolean>;
+  concluirPrimeiroAcesso: (email: string, senha: string, nome?: string) => Promise<any>;
   loading: boolean;
   notify: (message: string, type: 'success' | 'error') => void;
   refreshData: () => Promise<void>;
@@ -191,7 +193,7 @@ export const useApp = () => {
 };
 
 import { Login } from './Login';
-import { NovaSenha } from './NovaSenha';
+import NovaSenha from './NovaSenha';
 
 // ==========================================
 // MÓDULO: ÁREA DE MEMBROS (ALUNO) - AUTH/DASH
@@ -1633,6 +1635,9 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
   };
 
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const loadData = async () => {
     try {
       const [pRes, sRes, tRes, nRes, bRes] = await Promise.all([
@@ -1722,25 +1727,41 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const initAuth = async () => {
       setLoading(true);
 
-      // Detectar se é um link de recuperação de senha
-      const currentHash = window.location.hash;
-      const isRecovery = currentHash.includes('type=recovery') || 
-                        currentHash.includes('access_token=');
+      // Detectar se é um link de recuperação de senha (PKCE ou Implicit)
+      const isRecovery = location.hash.includes('type=recovery') || 
+                        location.hash.includes('access_token=') ||
+                        location.search.includes('code=');
       
       if (isRecovery) {
-        console.log('Detectado link de recuperação no hash:', currentHash);
+        console.log('Detectado link de recuperação:', { hash: location.hash, search: location.search });
         // Se o hash contém os tokens mas não está na rota certa, redireciona preservando os tokens
-        if (!currentHash.includes('#/nova-senha')) {
-          const tokens = currentHash.startsWith('#/') ? currentHash.substring(2) : currentHash.substring(1);
-          window.location.hash = `#/nova-senha#${tokens}`;
+        if (!location.pathname.includes('/nova-senha')) {
+          navigate(`/nova-senha${location.hash}${location.search}`, { replace: true });
+          setLoading(false);
+          return;
         }
       }
 
       await loadData();
       
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
+      const isResetting = location.hash.includes('type=recovery') || 
+                         location.hash.includes('access_token=') ||
+                         location.hash.includes('recovery_token=') ||
+                         location.search.includes('code=');
+
+      if (isResetting && !location.pathname.includes('/nova-senha')) {
+        console.log('App: Detectado link de recuperação, redirecionando com tokens...');
+        navigate(`/nova-senha${location.hash}${location.search}`, { replace: true });
+        setLoading(false);
+        return;
+      }
+
+      if (session?.user && !isResetting) {
         await syncUser(session.user.email!);
+      } else if (isResetting) {
+        // Se estiver resetando, garante que o estado do usuário seja nulo para evitar redirecionamentos
+        setUser(null);
       } else {
         const saved = localStorage.getItem('bs_auth_user');
         if (saved) {
@@ -1762,14 +1783,21 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
         if (event === 'PASSWORD_RECOVERY') {
           console.log('Redirecionando para nova-senha via evento...');
-          // Se já estivermos na rota certa (mesmo com tokens), não faz nada
-          if (!window.location.hash.includes('#/nova-senha')) {
-            window.location.hash = '/nova-senha';
+          setUser(null);
+          if (!location.pathname.includes('/nova-senha')) {
+            navigate(`/nova-senha${location.hash}${location.search}`, { replace: true });
           }
+          setLoading(false);
           return;
         }
 
-        if (session?.user) {
+        // Se for um evento de login vindo de uma recuperação, não sincroniza o usuário ainda
+        // para evitar que ele seja jogado no dashboard antes de criar a senha
+        const isResetting = location.hash.includes('type=recovery') || 
+                           location.hash.includes('access_token=') ||
+                           location.hash.includes('recovery_token=');
+
+        if (session?.user && !isResetting) {
           try {
             await verificarStatusAtivo(session.user.email!, theme.adminEmail);
             await syncUser(session.user.email!);
@@ -1795,7 +1823,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     return () => {
       if (subscription) subscription.unsubscribe();
     };
-  }, [theme.adminEmail]);
+  }, [theme.adminEmail, location.pathname, location.hash, location.search]);
 
   const syncUser = async (email: string) => {
     // Check if it's admin
@@ -1985,7 +2013,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       
       notify('Sessão encerrada com sucesso.', 'success');
       // Force navigation to home
-      window.location.href = window.location.origin + window.location.pathname + '#/';
+      window.location.href = "/";
     },
     signIn: async (email: string, pass: string) => {
       await authLogin(email, pass, theme.adminEmail);
@@ -1995,6 +2023,12 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     },
     atualizarSenha: async (novaSenha: string) => {
       await atualizarSenha(novaSenha);
+    },
+    verificarVendaParaPrimeiroAcesso: async (email: string) => {
+      return await verificarVendaParaPrimeiroAcesso(email, theme.adminEmail);
+    },
+    concluirPrimeiroAcesso: async (email: string, senha: string, nome?: string) => {
+      return await concluirPrimeiroAcesso(email, senha, nome, theme.adminEmail);
     },
     notify, refreshData: loadData,
     saveNotice: async (n: Notice) => { 
@@ -2471,27 +2505,50 @@ function AdminLayout({ children }: { children?: React.ReactNode }) {
 
 function MainRoutes() {
   const { user } = useApp();
+  const location = useLocation();
+  
+  const isRecovery = location.hash.includes('type=recovery') || 
+                    location.hash.includes('access_token=') ||
+                    location.hash.includes('recovery_token=') ||
+                    location.pathname.includes('/nova-senha') ||
+                    location.search.includes('code=');
+
   return (
     <Routes>
-      <Route path="/" element={user ? <Navigate to={user.role === 'admin' ? "/admin" : "/dashboard"} /> : <Login />} />
+      <Route path="/" element={
+        user && !isRecovery ? (
+          <Navigate to={user.role === 'admin' ? "/admin" : "/dashboard"} />
+        ) : (
+          isRecovery ? (
+            <Navigate to={`/nova-senha${location.hash}${location.search}`} />
+          ) : <Login />
+        )
+      } />
       <Route path="/nova-senha" element={<NovaSenha />} />
+      <Route path="/login" element={<Login />} />
       <Route path="/dashboard" element={<ProtectedRoute><Layout><DashboardView /></Layout></ProtectedRoute>} />
       <Route path="/viewer/:id" element={<ProtectedRoute><PDFViewerView /></ProtectedRoute>} />
       <Route path="/admin" element={<AdminRoute><AdminLayout><AdminView /></AdminLayout></AdminRoute>} />
-      <Route path="*" element={<Navigate to="/" />} />
+      <Route path="*" element={
+        isRecovery ? (
+          <Navigate to={`/nova-senha${location.hash}${location.search}`} />
+        ) : (
+          <Navigate to="/" />
+        )
+      } />
     </Routes>
   );
 }
 
 export default function App() {
   return (
-    <HashRouter>
+    <BrowserRouter>
       <PWAWrapper>
         <AppProvider>
           <MainRoutes />
         </AppProvider>
       </PWAWrapper>
-    </HashRouter>
+    </BrowserRouter>
   );
 }
 
