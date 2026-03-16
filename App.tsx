@@ -1,9 +1,11 @@
 import React, { useState, createContext, useContext, useRef, useEffect, useMemo, useCallback } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import { supabase } from './supabaseClient';
 import { verificarVendaParaPrimeiroAcesso, concluirPrimeiroAcesso, login as authLogin, verificarStatusAtivo, verificarPermissao, solicitarResetSenha, atualizarSenha } from './authService';
 import { 
+  AlertCircle,
+  RefreshCw,
   Plus, 
   Lock, 
   ChevronRight,
@@ -14,6 +16,7 @@ import {
   ChevronLeft,
   Check,
   ArrowLeft,
+  ArrowRight,
   LogOut,
   Mail,
   Key,
@@ -31,7 +34,6 @@ import {
   Bell,
   BellDot,
   MessageCircle,
-  AlertCircle,
   BellOff,
   Settings,
   Palette,
@@ -60,19 +62,30 @@ import {
 } from 'lucide-react';
 import { Product, User, Category, ThemeSettings, ReleaseType, WebhookLog, PromotionBanner, Notice, HotmartWebhookPayload } from './types';
 import { INITIAL_PRODUCTS, INITIAL_BANNERS, INITIAL_NOTICES, DEFAULT_THEME } from './constants';
+import { isProductUnlocked } from './utils';
 
 // ==========================================
 // CONFIGURAÇÕES E SETUP SUPABASE
 // ==========================================
 
+const ALLOWED_PRODUCT_IDS = ['7185103', '2865044'];
+const MAIN_PRODUCT_ID = ALLOWED_PRODUCT_IDS[0];
+const isAllowedProduct = (id: any) => {
+  const cleanId = String(id || '').trim();
+  return ALLOWED_PRODUCT_IDS.includes(cleanId) || ALLOWED_PRODUCT_IDS.includes(String(parseInt(cleanId)));
+};
+
 GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@5.4.624/build/pdf.worker.min.mjs';
 
-const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: boolean = false) => {
+const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: boolean = false, masterPurchaseDate?: string) => {
   const now = new Date();
   
+  // Se o usuário tiver o produto principal, usamos a data de compra dele como base para todos os produtos
+  const effectivePurchaseDate = purchaseDate || masterPurchaseDate;
+  
   // Debug log para ajudar a identificar problemas de liberação
-  if (purchaseDate) {
-    console.log(`Checking status for ${product.name}: Purchase=${purchaseDate}, Type=${product.releaseType}, Days=${product.releaseDays}, Admin=${isAdmin}`);
+  if (effectivePurchaseDate) {
+    console.log(`Checking status for ${product.name}: Purchase=${effectivePurchaseDate}, Type=${product.releaseType}, Days=${product.releaseDays}, Admin=${isAdmin}`);
   }
   
   // Se o produto estiver forçado como bloqueado pelo admin
@@ -86,13 +99,13 @@ const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: bool
     };
   }
 
-  // Se não tem data de compra e não é admin, está bloqueado (venda)
-  if (!purchaseDate && !isAdmin) {
+  // Se não tem data de compra (nem individual nem master) e não é admin, está bloqueado
+  if (!effectivePurchaseDate && !isAdmin) {
     return { isReleased: false, isLocked: true, message: 'BLOQUEADO', sub: 'TOQUE PARA ADQUIRIR', icon: <Lock size={18} /> };
   }
 
-  // Se for admin e não tiver data de compra (comum), assume que a compra foi "agora" para fins de teste de delay
-  const pDate = purchaseDate ? new Date(purchaseDate) : new Date();
+  // Se for admin e não tiver data de compra, assume que a compra foi "agora"
+  const pDate = effectivePurchaseDate ? new Date(effectivePurchaseDate) : new Date();
 
   if (product.releaseType === ReleaseType.IMMEDIATE) {
     return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: 'Pronto para leitura', icon: <Check size={18} /> };
@@ -100,9 +113,7 @@ const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: bool
 
   if (product.releaseType === ReleaseType.SCHEDULED) {
     const days = typeof product.releaseDays === 'number' ? product.releaseDays : 7;
-    // Adicionamos um pequeno buffer de 1 minuto para evitar problemas de sincronia de milissegundos
-    const releaseDateObj = new Date(pDate.getTime() + (days * 86400000) - 60000);
-    const isActuallyReleased = now >= releaseDateObj;
+    const isActuallyReleased = isProductUnlocked(pDate, days);
     
     if (isActuallyReleased || isAdmin) {
       return { 
@@ -114,15 +125,19 @@ const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: bool
       };
     }
 
+    const releaseDateObj = new Date(pDate.getTime());
+    releaseDateObj.setDate(releaseDateObj.getDate() + days);
+
     const diffMs = releaseDateObj.getTime() - now.getTime();
     const diffDays = Math.ceil(diffMs / 86400000);
 
     return { 
       isReleased: false, 
       isLocked: true, 
-      message: diffDays <= 0 ? 'LIBERANDO...' : `EM ${diffDays} DIAS`, 
-      sub: `Prepare o coração!`, 
-      icon: <Clock size={18} /> 
+      message: 'BLOQUEADO', 
+      sub: diffDays <= 0 ? 'LIBERANDO...' : `LIBERADO EM ${diffDays} DIAS`, 
+      icon: <Lock size={18} />,
+      daysRemaining: diffDays
     };
   }
 
@@ -194,6 +209,8 @@ export const useApp = () => {
 
 import { Login } from './Login';
 import NovaSenha from './NovaSenha';
+import ResetSenha from './ResetSenha';
+import EsqueciSenha from './EsqueciSenha';
 
 // ==========================================
 // MÓDULO: ÁREA DE MEMBROS (ALUNO) - AUTH/DASH
@@ -203,10 +220,58 @@ import NovaSenha from './NovaSenha';
 // MÓDULO: ÁREA DE MEMBROS (ALUNO) - DASHBOARD
 // ==========================================
 
+function NoAccessScreen({ isExpired }: { isExpired?: boolean }) {
+  const { theme, logout } = useApp();
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6 bg-stone-50" style={{ backgroundColor: theme.backgroundColor }}>
+      <div className="max-w-md w-full bg-white rounded-[40px] p-10 shadow-2xl border border-stone-100 text-center space-y-8 animate-in zoom-in-95 duration-500">
+        <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center mx-auto shadow-inner">
+          <Lock size={40} className="text-orange-600" />
+        </div>
+        <div className="space-y-4">
+          <h2 className="text-3xl font-black uppercase italic tracking-tighter text-stone-800">
+            {isExpired ? 'ACESSO EXPIRADO' : 'ACESSO RESTRITO'}
+          </h2>
+          <p className="text-sm font-medium text-stone-500 leading-relaxed">
+            {isExpired 
+              ? 'Sua assinatura do Cardápio do Bebê Saudável expirou. Renove seu acesso para continuar aproveitando nossos conteúdos exclusivos.'
+              : 'Olá! Identificamos que você ainda não possui uma assinatura ativa do Cardápio do Bebê Saudável vinculada a este e-mail.'}
+          </p>
+          <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100 text-xs font-bold text-stone-400 uppercase tracking-widest">
+            {isExpired ? 'Renove agora e não perca nada' : 'Verifique se usou o mesmo e-mail da Hotmart'}
+          </div>
+        </div>
+        <div className="space-y-4 pt-4">
+          <a 
+            href={theme.externalSiteUrl || "https://appcardapiodobebe.com"} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="w-full py-5 bg-stone-900 text-white rounded-full font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:bg-black hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            ADQUIRIR ACESSO <ExternalLink size={16} />
+          </a>
+          <button 
+            onClick={logout}
+            className="w-full py-4 bg-white text-stone-400 rounded-full font-black text-[10px] uppercase tracking-widest hover:text-stone-600 transition-all"
+          >
+            SAIR E ENTRAR COM OUTRO E-MAIL
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DashboardView() {
   const { products, user, theme, notices, banners, allCategories } = useApp();
   const [currentBanner, setCurrentBanner] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
+  // Se o usuário não tiver acesso ou estiver expirado, mostra a tela de bloqueio
+  const isExpired = isAccessExpired(user);
+  if (user && user.role !== 'admin' && (user.status === 'no-access' || isExpired)) {
+    return <NoAccessScreen isExpired={isExpired} />;
+  }
   
   const filteredProducts = useMemo(() => {
     let list = products.filter(p => p.active);
@@ -349,7 +414,7 @@ function DashboardView() {
         {filteredProducts.map(p => {
           const purchase = user?.purchasedProducts?.find(x => x.productId === p.id) || 
                           (p.isBonus ? user?.purchasedProducts?.find(x => x.productId === p.parentId) : null);
-          const status = getReleaseStatus(p, purchase?.purchaseDate, user?.role === 'admin');
+          const status = getReleaseStatus(p, purchase?.purchaseDate, user?.role === 'admin', user?.masterPurchaseDate);
           return (
             <Link 
               key={p.id} 
@@ -390,42 +455,35 @@ function DashboardView() {
                 </div>
 
                 {status.isLocked && (
-                  <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px] flex flex-col items-center justify-center text-white p-4 text-center transition-all duration-500 group-hover:bg-black/40">
-                    <div className="w-14 h-14 md:w-20 md:h-20 rounded-full bg-white/10 backdrop-blur-2xl border border-white/30 flex items-center justify-center mb-4 shadow-[0_0_30px_rgba(0,0,0,0.3)] transform transition-all duration-700 group-hover:scale-110 group-hover:rotate-6 group-hover:bg-white/20">
-                      <div className="text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] scale-125">
-                        {status.icon}
-                      </div>
+                  <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px] flex flex-col items-center justify-center text-white p-4 text-center transition-all duration-500">
+                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center mb-4 shadow-xl">
+                      <Lock size={24} className="text-white" />
                     </div>
                     
-                    <div className="space-y-1 transform transition-all duration-500 group-hover:translate-y-[-2px]">
-                      <span className="text-[11px] md:text-sm font-black uppercase tracking-[0.4em] block drop-shadow-2xl text-white">
-                        {status.message}
+                    <div className="space-y-1">
+                      <span className="text-[10px] md:text-xs font-black uppercase tracking-[0.3em] block text-white">
+                        BLOQUEADO
                       </span>
                       {status.sub && (
-                        <span className="text-[8px] md:text-[10px] font-black opacity-90 uppercase tracking-widest block text-white/80">
+                        <span className="text-[8px] md:text-[9px] font-bold opacity-80 uppercase tracking-widest block text-white/90">
                           {status.sub}
                         </span>
                       )}
                     </div>
 
-                    {p.checkoutUrl && (
-                      <div className="mt-6 px-8 py-3 bg-white text-black rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.2em] opacity-0 group-hover:opacity-100 md:group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0 shadow-[0_15px_30px_rgba(0,0,0,0.4)] hover:bg-orange-500 hover:text-white hover:scale-105 active:scale-95">
-                        DESBLOQUEAR AGORA
-                      </div>
-                    )}
-                    
-                    {/* Mobile always show hint if locked and has checkout */}
-                    {p.checkoutUrl && (
-                      <div className="md:hidden mt-4 text-[7px] font-black uppercase tracking-widest opacity-60">
-                        Toque para adquirir
+                    {p.checkoutUrl && !status.daysRemaining && (
+                      <div className="mt-6 px-6 py-2.5 bg-white text-black rounded-full text-[9px] font-black uppercase tracking-widest shadow-xl hover:bg-stone-100 transition-all">
+                        ADQUIRIR AGORA
                       </div>
                     )}
                   </div>
                 )}
 
                 {!status.isLocked && status.isReleased && (
-                  <div className="absolute top-3 right-3 md:top-4 md:right-4 w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all duration-500 shadow-lg">
-                    <ArrowLeft size={18} className="rotate-180" />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-500 flex items-center justify-center">
+                    <div className="px-8 py-3 bg-white text-black rounded-full text-[10px] font-black uppercase tracking-[0.2em] opacity-0 group-hover:opacity-100 transform translate-y-4 group-hover:translate-y-0 transition-all duration-500 shadow-2xl flex items-center gap-2">
+                      ACESSAR <ArrowRight size={14} />
+                    </div>
                   </div>
                 )}
               </div>
@@ -1018,19 +1076,49 @@ const AdminView = () => {
           </div>
 
           <div className="space-y-8">
-            <div className="bg-white rounded-[50px] p-10 border border-stone-100 shadow-sm min-h-[600px] flex flex-col">
+            <div className="bg-white rounded-[50px] p-10 border border-stone-100 shadow-sm flex flex-col">
               <div className="flex items-center justify-between mb-10">
                 <div className="flex items-center gap-3">
                   <Activity size={18} className="text-orange-500" />
-                  <h3 className="text-[10px] font-black uppercase tracking-widest text-stone-800">AUDITORIA EM TEMPO REAL</h3>
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-stone-800">STATUS DO BANCO</h3>
                 </div>
+                <button 
+                  onClick={handleCheckDb} 
+                  disabled={isCheckingDb}
+                  className="p-2 hover:bg-stone-50 rounded-full transition-all"
+                >
+                  <RefreshCw size={14} className={isCheckingDb ? 'animate-spin' : ''} />
+                </button>
               </div>
 
-              <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 opacity-20">
-                <div className="w-16 h-16 bg-stone-50 rounded-full flex items-center justify-center">
-                  <Activity size={32} strokeWidth={1} />
-                </div>
-                <p className="text-[10px] font-black uppercase tracking-widest">SEM ATIVIDADE RECENTE.</p>
+              <div className="space-y-4">
+                {['products', 'sales', 'settings', 'notices'].map(table => (
+                  <div key={table} className="flex items-center justify-between p-4 bg-stone-50 rounded-2xl border border-stone-100">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-stone-400">{table}</span>
+                    {dbStatus[table] === true ? (
+                      <div className="flex items-center gap-2 text-emerald-500">
+                        <Check size={12} />
+                        <span className="text-[8px] font-black uppercase">OK</span>
+                      </div>
+                    ) : dbStatus[table] === false ? (
+                      <div className="flex items-center gap-2 text-red-500">
+                        <AlertCircle size={12} />
+                        <span className="text-[8px] font-black uppercase">ERRO</span>
+                      </div>
+                    ) : (
+                      <span className="text-[8px] font-black uppercase text-stone-300">NÃO VERIFICADO</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              
+              <div className="mt-8 pt-8 border-t border-stone-100">
+                <button 
+                  onClick={clearAllData}
+                  className="w-full py-4 text-red-400 hover:text-red-500 text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+                >
+                  <Trash2 size={14} /> LIMPAR TODO O BANCO
+                </button>
               </div>
             </div>
           </div>
@@ -1640,6 +1728,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const loadData = async () => {
     try {
+      // Check database tables first for debugging
+      const dbCheck = await value.checkDatabase();
+      console.log('Database Table Check:', dbCheck);
+
       const [pRes, sRes, tRes, nRes, bRes] = await Promise.all([
         supabase.from('products').select('*'),
         supabase.from('sales').select('*'),
@@ -1702,7 +1794,12 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       if (tRes.data) {
         const themeData = tRes.data.data || tRes.data.value;
         if (themeData) {
-          setThemeState(prev => ({...DEFAULT_THEME, ...prev, ...themeData}));
+          setThemeState(prev => {
+            const newState = {...DEFAULT_THEME, ...prev, ...themeData};
+            // Garantir que o adminEmail nunca fique vazio se houver um padrão
+            if (!newState.adminEmail) newState.adminEmail = DEFAULT_THEME.adminEmail;
+            return newState;
+          });
         }
       }
 
@@ -1725,97 +1822,87 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     let subscription: { unsubscribe: () => void } | null = null;
 
     const initAuth = async () => {
-      setLoading(true);
+      try {
+        setLoading(true);
 
-      // Detectar se é um link de recuperação de senha (PKCE ou Implicit)
-      const isRecovery = location.hash.includes('type=recovery') || 
-                        location.hash.includes('access_token=') ||
-                        location.search.includes('code=');
-      
-      if (isRecovery) {
-        console.log('Detectado link de recuperação:', { hash: location.hash, search: location.search });
-        // Se o hash contém os tokens mas não está na rota certa, redireciona preservando os tokens
-        if (!location.pathname.includes('/nova-senha')) {
-          navigate(`/nova-senha${location.hash}${location.search}`, { replace: true });
-          setLoading(false);
-          return;
-        }
-      }
+        // Detectar se é um link de recuperação de senha (PKCE ou Implicit)
+        const isRecovery = location.hash.includes('type=recovery') || 
+                          location.hash.includes('access_token=') ||
+                          location.hash.includes('recovery_token=') ||
+                          location.search.includes('code=') ||
+                          (location.hash.includes('code=')); // Caso o código venha no hash
+        
+        if (isRecovery && !location.pathname.includes('/nova-senha')) {
+          console.log('App: Detectado link de recuperação, redirecionando para /nova-senha...');
+          
+          let targetSearch = location.search;
+          let targetHash = location.hash;
 
-      await loadData();
-      
-      const { data: { session } } = await supabase.auth.getSession();
-      const isResetting = location.hash.includes('type=recovery') || 
-                         location.hash.includes('access_token=') ||
-                         location.hash.includes('recovery_token=') ||
-                         location.search.includes('code=');
-
-      if (isResetting && !location.pathname.includes('/nova-senha')) {
-        console.log('App: Detectado link de recuperação, redirecionando com tokens...');
-        navigate(`/nova-senha${location.hash}${location.search}`, { replace: true });
-        setLoading(false);
-        return;
-      }
-
-      if (session?.user && !isResetting) {
-        await syncUser(session.user.email!);
-      } else if (isResetting) {
-        // Se estiver resetando, garante que o estado do usuário seja nulo para evitar redirecionamentos
-        setUser(null);
-      } else {
-        const saved = localStorage.getItem('bs_auth_user');
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (parsed.email.toLowerCase() === theme.adminEmail.toLowerCase()) {
-              setUser(parsed);
-            } else {
-              setUser(parsed);
+          // Limpeza de hash caso o código PKCE tenha vindo nele (comum em transição de HashRouter)
+          if (location.hash.includes('code=')) {
+            const params = new URLSearchParams(location.hash.split('?')[1] || location.hash.substring(1));
+            const code = params.get('code');
+            if (code) {
+              targetSearch = `?code=${code}`;
+              targetHash = '';
             }
-          } catch (e) {
-            localStorage.removeItem('bs_auth_user');
           }
-        }
-      }
-      
-      const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log('Auth event:', event);
 
-        if (event === 'PASSWORD_RECOVERY') {
-          console.log('Redirecionando para nova-senha via evento...');
-          setUser(null);
-          if (!location.pathname.includes('/nova-senha')) {
-            navigate(`/nova-senha${location.hash}${location.search}`, { replace: true });
-          }
+          const targetPath = `/nova-senha${targetSearch}${targetHash}`;
+          console.log('App: Redirecionando para:', targetPath);
+          navigate(targetPath, { replace: true });
           setLoading(false);
           return;
         }
 
-        // Se for um evento de login vindo de uma recuperação, não sincroniza o usuário ainda
-        // para evitar que ele seja jogado no dashboard antes de criar a senha
-        const isResetting = location.hash.includes('type=recovery') || 
-                           location.hash.includes('access_token=') ||
-                           location.hash.includes('recovery_token=');
+        await loadData();
+        
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+          await syncUser(session.user.email!);
+        } else {
+          const saved = localStorage.getItem('bs_auth_user');
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              if (parsed.email.toLowerCase() === theme.adminEmail.toLowerCase()) {
+                setUser(parsed);
+              } else {
+                setUser(parsed);
+              }
+            } catch (e) {
+              localStorage.removeItem('bs_auth_user');
+            }
+          }
+        }
+        
+        const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+          console.log('App: Auth event:', event, 'Session:', session?.user?.email);
 
-        if (session?.user && !isResetting) {
-          try {
-            await verificarStatusAtivo(session.user.email!, theme.adminEmail);
-            await syncUser(session.user.email!);
-          } catch (err: any) {
-            console.error('Acesso negado no onAuthStateChange:', err.message);
-            notify(err.message || 'Acesso negado.', 'error');
+          if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+            console.log('App: Usuário logado ou atualizado:', session?.user?.email);
+          }
+
+          if (session?.user) {
+            try {
+              // Apenas sincroniza o usuário. O controle de acesso será feito no Dashboard.
+              await syncUser(session.user.email!);
+            } catch (err: any) {
+              console.error('Erro ao sincronizar usuário:', err.message);
+            }
+          } else if (event === 'SIGNED_OUT') {
             setUser(null);
             localStorage.removeItem('bs_auth_user');
-            await supabase.auth.signOut();
           }
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-          localStorage.removeItem('bs_auth_user');
-        }
-      });
+        });
 
-      subscription = authListener.subscription;
-      setLoading(false);
+        subscription = authListener.subscription;
+      } catch (error) {
+        console.error("Erro no initAuth:", error);
+      } finally {
+        setLoading(false);
+      }
     };
 
     initAuth();
@@ -1828,12 +1915,16 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const syncUser = async (email: string) => {
     // Check if it's admin
     if (email.toLowerCase() === theme.adminEmail.toLowerCase()) {
-      setUser({ id: 'admin', name: 'Master Admin', email, role: 'admin', status: 'active', accessType: 'lifetime', startDate: new Date().toISOString(), purchasedProducts: [] });
+      setUser({ id: 'admin', name: 'Master Admin', email, role: 'admin', status: 'active', accessType: 'lifetime', startDate: new Date().toISOString(), masterPurchaseDate: undefined, purchasedProducts: [] });
       return;
     }
 
     // Fetch all sale data from 'sales' table for this email
-    const { data: salesData } = await supabase.from('sales').select('*').eq('email', email.trim().toLowerCase());
+    const emailLimpo = email.trim().toLowerCase();
+    const { data: salesData } = await supabase
+      .from('sales')
+      .select('*')
+      .or(`email.eq.${emailLimpo},e-mail.eq.${emailLimpo}`);
     
     if (salesData && salesData.length > 0) {
       // Use the first record for basic info (name, status, etc)
@@ -1843,12 +1934,24 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       const purchasedProducts = salesData
         .filter(sale => sale.product_id || sale.id_do_produto)
         .map(sale => ({
-          productId: sale.product_id || sale.id_do_produto,
-          purchaseDate: sale.created_at || sale.criado_em
+          productId: String(sale.product_id || sale.id_do_produto),
+          purchaseDate: sale.purchase_date || sale.created_at || sale.criado_em
         }));
 
+      const activeStatuses = ['ativo', 'approved', 'complete', 'active', 'aprovado', 'pago', 'finalizado', 'concluido'];
+
+      // Encontrar a data de compra de um produto permitido
+      const masterSale = salesData.find(sale => {
+        const s = String(sale.status || '').toLowerCase();
+        return isAllowedProduct(sale.product_id || sale.id_do_produto) && activeStatuses.includes(s);
+      });
+      const masterPurchaseDate = masterSale ? (masterSale.purchase_date || masterSale.created_at || masterSale.criado_em) : undefined;
+
       // Determine overall user status (active if any sale is active)
-      const isAnyActive = salesData.some(sale => sale.status === 'ativo');
+      const isAnyActive = salesData.some(sale => {
+        const s = String(sale.status || '').toLowerCase();
+        return activeStatuses.includes(s);
+      });
 
       // Map flat sales data to User object
       const mappedUser: User = {
@@ -1860,11 +1963,22 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         accessType: '1year',
         startDate: primaryData.created_at || primaryData.criado_em,
         expiryDate: primaryData.expires_at || primaryData.expira_em,
+        masterPurchaseDate: masterPurchaseDate,
         purchasedProducts: purchasedProducts
       };
       setUser(mappedUser);
     } else {
-      setUser(null);
+      // Se não encontrar na tabela sales, permite o login mas marca como sem acesso
+      setUser({
+        id: email,
+        name: 'Usuário',
+        email: email,
+        role: 'user',
+        status: 'no-access',
+        accessType: '1year',
+        startDate: new Date().toISOString(),
+        purchasedProducts: []
+      });
     }
   };
 
@@ -2016,19 +2130,19 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       window.location.href = "/";
     },
     signIn: async (email: string, pass: string) => {
-      await authLogin(email, pass, theme.adminEmail);
+      await authLogin(email, pass);
     },
     solicitarResetSenha: async (email: string) => {
-      await solicitarResetSenha(email, theme.adminEmail);
+      await solicitarResetSenha(email);
     },
     atualizarSenha: async (novaSenha: string) => {
       await atualizarSenha(novaSenha);
     },
     verificarVendaParaPrimeiroAcesso: async (email: string) => {
-      return await verificarVendaParaPrimeiroAcesso(email, theme.adminEmail);
+      return await verificarVendaParaPrimeiroAcesso(email);
     },
     concluirPrimeiroAcesso: async (email: string, senha: string, nome?: string) => {
-      return await concluirPrimeiroAcesso(email, senha, nome, theme.adminEmail);
+      return await concluirPrimeiroAcesso(email, senha, nome);
     },
     notify, refreshData: loadData,
     saveNotice: async (n: Notice) => { 
@@ -2125,6 +2239,9 @@ const PDFViewerView = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const product = products.find(p => p.id === id);
+  const purchase = user?.purchasedProducts?.find(x => x.productId === product?.id) || 
+                  (product?.isBonus ? user?.purchasedProducts?.find(x => x.productId === product?.parentId) : null);
+  const status = product ? getReleaseStatus(product, purchase?.purchaseDate, user?.role === 'admin', user?.masterPurchaseDate) : { isReleased: false };
 
   useEffect(() => {
     if (!product?.pdfUrl) return;
@@ -2503,6 +2620,69 @@ function AdminLayout({ children }: { children?: React.ReactNode }) {
   );
 }
 
+function ContentGuard({ children }: { children: React.ReactNode }) {
+  const { id } = useParams();
+  const { user, products, loading, notify, theme } = useApp();
+  const navigate = useNavigate();
+  const [isVerifying, setIsVerifying] = useState(true);
+
+  useEffect(() => {
+    const verifyAccess = async () => {
+      if (!user || !id) return;
+      
+      try {
+        // 1. Verificar sessão Supabase
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error('Sessão expirada. Por favor, faça login novamente.');
+
+        // 2. Verificar venda ativa
+        await verificarPermissao(user.email, theme.adminEmail);
+
+        // 3. Verificar release_date
+        const product = products.find(p => p.id === id);
+        if (!product) throw new Error('Produto não encontrado.');
+
+        const purchase = user.purchasedProducts?.find(x => x.productId === product.id) || 
+                        (product.isBonus ? user.purchasedProducts?.find(x => x.productId === product.parentId) : null);
+        
+        const status = getReleaseStatus(product, purchase?.purchaseDate, user.role === 'admin', user.masterPurchaseDate);
+
+        if (!status.isReleased) {
+          throw new Error(status.sub || 'Este conteúdo ainda não foi liberado para sua conta.');
+        }
+
+        setIsVerifying(false);
+      } catch (err: any) {
+        notify(err.message, 'error');
+        navigate('/dashboard');
+      }
+    };
+
+    if (!loading) {
+      verifyAccess();
+    }
+  }, [user, id, loading, products, theme.adminEmail]);
+
+  if (loading || isVerifying) {
+    return (
+      <div className="h-screen bg-stone-950 flex flex-col items-center justify-center gap-6">
+        <div className="relative">
+          <Loader2 className="animate-spin text-white opacity-20" size={60} />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Shield className="text-white animate-pulse" size={24} />
+          </div>
+        </div>
+        <div className="text-center space-y-2">
+          <p className="text-white text-[10px] font-black uppercase tracking-[0.4em]">Proteção Ativa</p>
+          <p className="text-stone-500 text-[8px] font-bold uppercase tracking-widest">Validando sua licença de acesso...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 function MainRoutes() {
   const { user } = useApp();
   const location = useLocation();
@@ -2511,7 +2691,23 @@ function MainRoutes() {
                     location.hash.includes('access_token=') ||
                     location.hash.includes('recovery_token=') ||
                     location.pathname.includes('/nova-senha') ||
-                    location.search.includes('code=');
+                    location.search.includes('code=') ||
+                    location.hash.includes('code=');
+
+  const getRecoveryPath = () => {
+    let search = location.search;
+    let hash = location.hash;
+
+    if (hash.includes('code=')) {
+      const params = new URLSearchParams(hash.split('?')[1] || hash.substring(1));
+      const code = params.get('code');
+      if (code) {
+        search = `?code=${code}`;
+        hash = '';
+      }
+    }
+    return `/nova-senha${search}${hash}`;
+  };
 
   return (
     <Routes>
@@ -2520,18 +2716,20 @@ function MainRoutes() {
           <Navigate to={user.role === 'admin' ? "/admin" : "/dashboard"} />
         ) : (
           isRecovery ? (
-            <Navigate to={`/nova-senha${location.hash}${location.search}`} />
+            <Navigate to={getRecoveryPath()} replace />
           ) : <Login />
         )
       } />
       <Route path="/nova-senha" element={<NovaSenha />} />
+      <Route path="/reset" element={<ResetSenha />} />
+      <Route path="/esqueci-senha" element={<EsqueciSenha />} />
       <Route path="/login" element={<Login />} />
       <Route path="/dashboard" element={<ProtectedRoute><Layout><DashboardView /></Layout></ProtectedRoute>} />
-      <Route path="/viewer/:id" element={<ProtectedRoute><PDFViewerView /></ProtectedRoute>} />
+      <Route path="/viewer/:id" element={<ProtectedRoute><ContentGuard><PDFViewerView /></ContentGuard></ProtectedRoute>} />
       <Route path="/admin" element={<AdminRoute><AdminLayout><AdminView /></AdminLayout></AdminRoute>} />
       <Route path="*" element={
         isRecovery ? (
-          <Navigate to={`/nova-senha${location.hash}${location.search}`} />
+          <Navigate to={getRecoveryPath()} replace />
         ) : (
           <Navigate to="/" />
         )
@@ -2541,14 +2739,13 @@ function MainRoutes() {
 }
 
 export default function App() {
+  console.log('App: Renderizando componente principal');
   return (
-    <BrowserRouter>
-      <PWAWrapper>
-        <AppProvider>
-          <MainRoutes />
-        </AppProvider>
-      </PWAWrapper>
-    </BrowserRouter>
+    <PWAWrapper>
+      <AppProvider>
+        <MainRoutes />
+      </AppProvider>
+    </PWAWrapper>
   );
 }
 
@@ -2590,16 +2787,7 @@ function PWAWrapper({ children }: { children: React.ReactNode }) {
 }
 
 function ProtectedRoute({ children }: { children?: React.ReactNode }) { 
-  const { user, loading, logout, notify } = useApp(); 
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (user && isAccessExpired(user)) {
-      notify('Seu acesso expirou.', 'error');
-      logout();
-      navigate('/');
-    }
-  }, [user]);
+  const { user, loading } = useApp(); 
 
   if (loading) return <div className="h-screen bg-stone-950 flex items-center justify-center"><Loader2 className="animate-spin text-white" /></div>; 
   return user ? <>{children}</> : <Navigate to="/" />; 

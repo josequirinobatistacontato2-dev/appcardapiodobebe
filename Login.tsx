@@ -43,6 +43,7 @@ export const Login = () => {
         status: 'active', 
         accessType: 'lifetime', 
         startDate: new Date().toISOString(), 
+        masterPurchaseDate: undefined,
         purchasedProducts: [] 
       };
       setUser(adminUser);
@@ -69,18 +70,9 @@ export const Login = () => {
 
   const handleVerifyFirstAccess = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    try {
-      const emailLimpo = email.trim().toLowerCase();
-      await verificarVendaParaPrimeiroAcesso(emailLimpo);
-      notify('E-mail validado com sucesso! Agora crie sua senha.', 'success');
-      setStep('create-password');
-    } catch (err: any) {
-      console.error('verificarVendaParaPrimeiroAcesso error:', err);
-      notify(err.message || 'E-mail não encontrado ou sem acesso ativo.', 'error');
-    } finally {
-      setLoading(false);
-    }
+    // Não verificamos mais a tabela sales aqui. Permitimos que o usuário prossiga para criar sua senha.
+    // O controle de acesso será feito dentro do Dashboard.
+    setStep('create-password');
   };
 
   const handleCreatePassword = async (e: React.FormEvent) => {
@@ -233,7 +225,7 @@ export const Login = () => {
                    </div>
                    
                    <div className="flex justify-center">
-                     <button type="button" onClick={()=>setStep('forgot-password')} className="text-[11px] font-black uppercase tracking-widest transition-all hover:scale-110 active:scale-95 hover:text-orange-600 opacity-60 hover:opacity-100" style={{ color: theme.secondaryColor }}>Esqueceu a senha?</button>
+                     <button type="button" onClick={()=>navigate('/esqueci-senha')} className="text-[11px] font-black uppercase tracking-widest transition-all hover:scale-110 active:scale-95 hover:text-orange-600 opacity-60 hover:opacity-100" style={{ color: theme.secondaryColor }}>Esqueceu a senha?</button>
                    </div>
                 </div>
 

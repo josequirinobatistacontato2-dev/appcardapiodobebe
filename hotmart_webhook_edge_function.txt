@@ -42,6 +42,7 @@ Deno.serve(async (req) => {
     const cleanEmail = email.trim().toLowerCase()
     const name = payload.data?.buyer?.name || payload.buyer?.name || 'Aluno'
     const productId = String(payload.data?.product?.id || payload.product?.id || payload.data?.product_id || '')
+    const purchaseDate = payload.data?.purchase?.date || payload.purchase?.date || new Date().toISOString()
     const event = (payload.event || payload.data?.event || '').toUpperCase()
 
     // 2. Mapeamento de Status conforme solicitado
@@ -93,6 +94,7 @@ Deno.serve(async (req) => {
       email: cleanEmail,
       name: name,
       product_id: productId,
+      purchase_date: purchaseDate,
       status: status,
       expires_at: expiresAt,
       updated_at: new Date().toISOString()

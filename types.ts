@@ -135,10 +135,11 @@ export interface User {
   password?: string;
   avatarUrl?: string; // Campo para a foto de perfil
   role: 'admin' | 'user';
-  status: 'active' | 'suspended';
+  status: 'active' | 'suspended' | 'no-access';
   accessType: AccessDuration;
   startDate: string; 
   expiryDate?: string; 
+  masterPurchaseDate?: string;
   resetToken?: string;
   resetTokenExpiry?: number;
   purchasedProducts: {
