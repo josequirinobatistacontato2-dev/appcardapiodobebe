@@ -76,10 +76,11 @@ async function startServer() {
       if (dbError) throw dbError;
 
       // 3. Enviar e-mail
-      const appUrl = process.env.APP_URL || process.env.URL_DO_APLICATIVO || 'http://localhost:3000';
+      const rawAppUrl = process.env.APP_URL || process.env.URL_DO_APLICATIVO || 'http://localhost:3000';
+      const appUrl = rawAppUrl.replace(/\/$/, '');
       const resetLink = `${appUrl}/reset?token=${token}`;
       
-      console.log(`[AUTH] Link de recuperação para ${emailLimpo}: ${resetLink}`);
+      console.log(`[AUTH] Link de recuperação gerado: ${resetLink}`);
 
       if (resend) {
         await resend.emails.send({
@@ -155,10 +156,30 @@ async function startServer() {
     }
   });
 
+  // 404 para rotas de API não encontradas
+  app.all("/api/*", (req, res) => {
+    res.status(404).json({ error: `Rota de API não encontrada: ${req.method} ${req.url}` });
+  });
+
   console.log(`[SERVER] Modo: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`[SERVER] APP_URL: ${process.env.APP_URL || 'Não definida'}`);
+  console.log(`[SERVER] URL_DO_APLICATIVO: ${process.env.URL_DO_APLICATIVO || 'Não definida'}`);
   // Forçamos modo desenvolvimento se não estiver explicitamente em produção
   const isProd = process.env.NODE_ENV === "production";
   
+  // Rota específica para reset para evitar problemas de diretório
+  app.get("/reset", async (req, res, next) => {
+    console.log(`[SERVER] Acessando rota /reset. Token presente: ${!!req.query.token}`);
+    const isProd = process.env.NODE_ENV === "production";
+    if (isProd) {
+      const indexPath = path.join(process.cwd(), "dist", "index.html");
+      if (fs.existsSync(indexPath)) {
+        return res.sendFile(indexPath);
+      }
+    }
+    next();
+  });
+
   // Vite middleware
   if (!isProd) {
     console.log("[SERVER] Iniciando Vite em modo middleware...");
