@@ -37,11 +37,15 @@ async function startServer() {
     res.json({ status: "ok", env: process.env.NODE_ENV });
   });
 
+  app.get("/test-server", (req, res) => {
+    res.send("Server is running correctly on port 3000");
+  });
+
   const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://zisijswmqoxtfxlgjwgr.supabase.co';
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inppc2lqc3dtcW94dGZ4bGdqd2dyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTM0MzYxMSwiZXhwIjoyMDg2OTE5NjExfQ.D3PUlmBb_q6M6G8O30AHN_md52d6V5Hou2NH1Xz8oT0';
   
-  if (!supabaseServiceKey) {
-    console.warn("AVISO: SUPABASE_SERVICE_ROLE_KEY não configurada. O sistema de recuperação de senha não funcionará.");
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.warn("AVISO: SUPABASE_SERVICE_ROLE_KEY não configurada no ambiente. Usando fallback.");
   }
 
   const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey || '', {
@@ -51,7 +55,8 @@ async function startServer() {
     }
   });
 
-  const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+  const resendKey = process.env.RESEND_API_KEY || 're_EPhXPhdr_C2o2bsnSa2CWTNsfQ7wJT3A2';
+  const resend = resendKey ? new Resend(resendKey) : null;
 
   // API: Solicitar Reset de Senha
   app.post("/api/auth/request-reset", async (req, res) => {
@@ -71,7 +76,8 @@ async function startServer() {
       if (dbError) throw dbError;
 
       // 3. Enviar e-mail
-      const resetLink = `${process.env.APP_URL || 'http://localhost:3000'}/reset?token=${token}`;
+      const appUrl = process.env.APP_URL || process.env.URL_DO_APLICATIVO || 'http://localhost:3000';
+      const resetLink = `${appUrl}/reset?token=${token}`;
       
       console.log(`[AUTH] Link de recuperação para ${emailLimpo}: ${resetLink}`);
 
@@ -149,27 +155,27 @@ async function startServer() {
     }
   });
 
+  console.log(`[SERVER] Modo: ${process.env.NODE_ENV || 'development'}`);
+  // Forçamos modo desenvolvimento se não estiver explicitamente em produção
+  const isProd = process.env.NODE_ENV === "production";
+  
   // Vite middleware
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProd) {
     console.log("[SERVER] Iniciando Vite em modo middleware...");
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "custom",
+      appType: "spa",
     });
-    app.use((req, res, next) => {
-      console.log(`[VITE] Request: ${req.method} ${req.url}`);
-      vite.middlewares(req, res, next);
-    });
-
-    app.use, async (req, res, next) => {
-      const url = req.originalUrl;
-      console.log(`[SERVER] Serving index.html for ${url}`);
+    app.use(vite.middlewares);
+    
+    // Fallback para index.html (Vite spa mode deve cuidar disso, mas garantimos)
+    app.get("*", async (req, res, next) => {
+      if (req.originalUrl.startsWith('/api')) return next();
       try {
-        let template = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
-        template = await vite.transformIndexHtml(url, template);
-        res.status(200).set({ "Content-Type": "text/html" }).end(template);
-      } catch (e: any) {
-        vite.ssrFixStacktrace(e);
+        const template = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
+        const html = await vite.transformIndexHtml(req.originalUrl, template);
+        res.status(200).set({ "Content-Type": "text/html" }).end(html);
+      } catch (e) {
         next(e);
       }
     });
@@ -181,9 +187,20 @@ async function startServer() {
     });
   }
 
+  // Error handler global
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("[SERVER] Erro na requisição:", err);
+    res.status(500).json({ error: "Erro interno do servidor", details: err.message });
+  });
+
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[SERVER] Servidor rodando em http://0.0.0.0:${PORT}`);
+    console.log(`[SERVER] Health check disponível em http://0.0.0.0:${PORT}/api/health`);
   });
 }
 
-startServer();
+console.log("[SERVER] Iniciando script server.ts...");
+startServer().catch(err => {
+  console.error("[SERVER] Erro fatal ao iniciar servidor:", err);
+  process.exit(1);
+});
