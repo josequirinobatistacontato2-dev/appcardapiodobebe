@@ -5,12 +5,17 @@ import { useApp } from './App';
 import { User } from './types';
 
 export const Login = () => {
-  const { setUser, theme, notify, signIn, solicitarResetSenha, verificarVendaParaPrimeiroAcesso, concluirPrimeiroAcesso } = useApp();
+  const { user, setUser, theme, notify, signIn, solicitarResetSenha, verificarVendaParaPrimeiroAcesso, concluirPrimeiroAcesso } = useApp();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // O redirecionamento de recuperação agora é tratado globalmente no App.tsx
-  }, []);
+    // Se o usuário já estiver logado, redireciona automaticamente
+    if (user) {
+      console.log('Login: Usuário já logado detectado, redirecionando...');
+      if (user.role === 'admin') navigate('/admin');
+      else navigate('/dashboard');
+    }
+  }, [user, navigate]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -54,16 +59,29 @@ export const Login = () => {
     }
 
     try {
-      await signIn(eTrim, password);
+      console.log('Login: Iniciando signIn para:', eTrim);
+      
+      // Timeout de 15 segundos para o login
+      const loginPromise = signIn(eTrim, password);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Tempo de resposta excedido. Verifique sua conexão.')), 15000)
+      );
+
+      await Promise.race([loginPromise, timeoutPromise]);
+      console.log('Login: signIn concluído com sucesso');
+      
       if (eTrim === theme.adminEmail.toLowerCase()) {
+        console.log('Login: Redirecionando para /admin');
         navigate('/admin');
       } else {
+        console.log('Login: Redirecionando para /dashboard');
         navigate('/dashboard');
       }
     } catch (err: any) {
       console.error('Login error:', err);
       notify(err.message || 'Erro ao realizar login.', 'error');
     } finally {
+      console.log('Login: Finalizando loading');
       setLoading(false);
     }
   };

@@ -19,13 +19,11 @@ export async function getUnlockedProducts(email: string): Promise<ProductStatus[
     const { data: salesData, error: salesError } = await supabase
       .from('sales')
       .select('purchase_date')
-      .eq('email', email)
-      .single();
+      .or(`email.eq.${email},e-mail.eq.${email}`)
+      .maybeSingle();
 
-    if (salesError) {
+    if (salesError && salesError.code !== 'PGRST116') {
       console.error('Erro ao buscar venda:', salesError);
-      // Se não houver venda, podemos assumir que nada está desbloqueado ou tratar como erro
-      // Para este fluxo, vamos buscar os produtos e retornar todos como bloqueados
     }
 
     const purchaseDate = salesData?.purchase_date;

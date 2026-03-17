@@ -174,6 +174,8 @@ interface Toast { message: string; type: 'success' | 'error'; id: number; }
 interface AppContextType {
   user: User | null;
   setUser: (user: User | null) => void;
+  userProfile: any;
+  setUserProfile: (profile: any) => void;
   products: Product[];
   saveProduct: (p: Product) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
@@ -192,6 +194,7 @@ interface AppContextType {
   webhookLogs: WebhookLog[];
   addLog: (log: Omit<WebhookLog, 'id' | 'timestamp'>) => Promise<void>;
   logout: () => Promise<void>;
+  loadSales: () => Promise<void>;
   signIn: (email: string, pass: string) => Promise<void>;
   solicitarResetSenha: (email: string) => Promise<void>;
   atualizarSenha: (novaSenha: string) => Promise<void>;
@@ -513,8 +516,12 @@ function DashboardView() {
 // ==========================================
 
 const AdminView = () => {
-  const { products, clients, theme, setTheme, setThemeState, allCategories, saveProduct, deleteProduct, saveClient, deleteClient, notify, banners, saveBanners, notices, saveNotice, deleteNotice, seedTestData, clearAllData, checkDatabase, logout, refreshData } = useApp();
+  const { products, clients, theme, setTheme, setThemeState, allCategories, saveProduct, deleteProduct, saveClient, deleteClient, notify, banners, saveBanners, notices, saveNotice, deleteNotice, seedTestData, clearAllData, checkDatabase, logout, refreshData, loadSales } = useApp();
   const [activeTab, setActiveTab] = useState<'CATALOG' | 'CLIENTS' | 'NOTICES' | 'BANNERS' | 'SUPPORT' | 'INTEGRATION' | 'BRANDING'>('CATALOG');
+
+  useEffect(() => {
+    loadSales();
+  }, []);
   
   const [dbStatus, setDbStatus] = useState<Record<string, boolean>>({});
   const [isCheckingDb, setIsCheckingDb] = useState(false);
@@ -1707,6 +1714,7 @@ const AdminView = () => {
 
 const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [clients, setClients] = useState<User[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
@@ -1731,79 +1739,48 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const checkDatabase = async () => {
+    const tables = ['products', 'sales', 'settings', 'notices'];
+    const results: Record<string, boolean> = {};
+    
+    for (const table of tables) {
+      try {
+        const { error } = await supabase.from(table).select('*').limit(1);
+        results[table] = !error;
+        if (error) console.warn(`Table ${table} check failed:`, error.message);
+      } catch (e) {
+        results[table] = false;
+      }
+    }
+    return results;
+  };
+
   const loadData = async () => {
+    console.log('App: loadData iniciando...');
     try {
       // Check database tables first for debugging
-      const dbCheck = await value.checkDatabase();
+      const dbCheck = await checkDatabase();
       console.log('Database Table Check:', dbCheck);
 
-      const [pRes, sRes, tRes, nRes, bRes] = await Promise.all([
+      const dataPromise = Promise.all([
         supabase.from('products').select('*'),
-        supabase.from('sales').select('*'),
         supabase.from('settings').select('*').eq('key', 'theme').maybeSingle(),
         supabase.from('notices').select('*'),
         supabase.from('settings').select('*').eq('key', 'banners_carousel').maybeSingle()
       ]);
+
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout ao carregar dados essenciais')), 8000)
+      );
+
+      const [pRes, tRes, nRes, bRes] = await Promise.race([dataPromise, timeoutPromise]) as any;
       
-      console.log('App: Dados carregados do Supabase:', {
-        products: pRes.data?.length,
-        sales: sRes.data?.length,
-        theme: !!tRes.data,
-        notices: nRes.data?.length,
-        banners: !!bRes.data
-      });
+      console.log('App: Dados essenciais carregados do Supabase');
       
       if (pRes.data) {
         setProducts(pRes.data.map(x => (x.data || x.value || x) as Product).filter(p => p && p.id));
       }
 
-      if (sRes.data) {
-        // Agrupar vendas por e-mail para lidar com múltiplos produtos por usuário
-        const clientsMap = new Map<string, User>();
-        
-        sRes.data.forEach(sale => {
-          const email = (sale.email || sale["e-mail"] || "").toLowerCase();
-          const isSaleActive = sale.status === 'ativo';
-          
-          if (!clientsMap.has(email)) {
-            clientsMap.set(email, {
-              id: email,
-              name: sale.name || sale.nome || 'Usuário',
-              email: email,
-              role: 'user',
-              status: isSaleActive ? 'active' : 'suspended',
-              accessType: '1year',
-              startDate: sale.created_at || sale.criado_em,
-              expiryDate: sale.expires_at || sale.expira_em,
-              purchasedProducts: []
-            });
-          } else {
-            // Se já existe, atualizamos o status para 'active' se pelo menos UMA venda for ativa
-            if (isSaleActive) {
-              clientsMap.get(email)!.status = 'active';
-            }
-          }
-          
-          if (sale.product_id || sale.id_do_produto) {
-            clientsMap.get(email)!.purchasedProducts.push({
-              productId: sale.product_id || sale.id_do_produto,
-              purchaseDate: sale.created_at || sale.criado_em
-            });
-          }
-        });
-        
-        const allClients = Array.from(clientsMap.values());
-        setClients(allClients);
-
-        // Se houver um usuário logado (que não seja admin), atualizar os dados dele também
-        if (user && user.role !== 'admin') {
-          const updatedUser = allClients.find(c => c.email.toLowerCase() === user.email.toLowerCase());
-          if (updatedUser) {
-            setUser(updatedUser);
-          }
-        }
-      }
-      
       if (tRes.data) {
         const themeData = tRes.data.data || tRes.data.value;
         if (themeData) {
@@ -1858,12 +1835,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         
         if (isRecovery && !location.pathname.includes('/nova-senha')) {
           console.log('App: Redirecionando para recuperação...');
-          // ... rest of the logic
           
           let targetSearch = location.search;
           let targetHash = location.hash;
 
-          // Limpeza de hash caso o código PKCE tenha vindo nele (comum em transição de HashRouter)
           if (location.hash.includes('code=')) {
             const params = new URLSearchParams(location.hash.split('?')[1] || location.hash.substring(1));
             const code = params.get('code');
@@ -1891,43 +1866,12 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           if (saved) {
             try {
               const parsed = JSON.parse(saved);
-              if (parsed.email.toLowerCase() === theme.adminEmail.toLowerCase()) {
-                setUser(parsed);
-              } else {
-                setUser(parsed);
-              }
+              setUser(parsed);
             } catch (e) {
               localStorage.removeItem('bs_auth_user');
             }
           }
         }
-        
-        const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-          console.log('App: Auth event:', event, 'Session:', session?.user?.email);
-
-          if (event === 'SIGNED_OUT') {
-            setUser(null);
-            localStorage.removeItem('bs_auth_user');
-            return;
-          }
-
-          if (session?.user) {
-            // Evitar sincronização durante o fluxo de redefinição de senha para não causar loops ou erros 400
-            if (event === 'USER_UPDATED' && window.location.pathname.includes('/nova-senha')) {
-              console.log('App: USER_UPDATED ignorado em /nova-senha para evitar conflitos');
-              return;
-            }
-
-            try {
-              // Apenas sincroniza o usuário. O controle de acesso será feito no Dashboard.
-              await syncUser(session.user.email!);
-            } catch (err: any) {
-              console.error('Erro ao sincronizar usuário:', err.message);
-            }
-          }
-        });
-
-        subscription = authListener.subscription;
       } catch (error) {
         console.error("Erro no initAuth:", error);
       } finally {
@@ -1937,25 +1881,76 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     };
 
     initAuth();
+  }, [theme.adminEmail]); // Re-init only if adminEmail changes
+
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('App: Auth event:', event, 'Session:', session?.user?.email);
+
+      if (event === 'SIGNED_OUT') {
+        console.log('App: Evento SIGNED_OUT detectado');
+        setUser(null);
+        localStorage.removeItem('bs_auth_user');
+        return;
+      }
+
+      if (session?.user) {
+        // Evitar sincronização durante o fluxo de redefinição de senha para não causar loops ou erros 400
+        if (event === 'USER_UPDATED' && window.location.pathname.includes('/nova-senha')) {
+          console.log('App: USER_UPDATED ignorado em /nova-senha para evitar conflitos');
+          return;
+        }
+
+        console.log('App: Usuário detectado na sessão, iniciando sincronização');
+        try {
+          await syncUser(session.user.email!);
+          console.log('App: Sincronização concluída para:', session.user.email);
+        } catch (err: any) {
+          console.error('App: Erro ao sincronizar usuário:', err.message);
+        }
+      } else {
+        console.log('App: Nenhum usuário na sessão');
+        setUser(null);
+        localStorage.removeItem('bs_auth_user');
+      }
+    });
 
     return () => {
-      if (subscription) subscription.unsubscribe();
+      authListener.subscription.unsubscribe();
     };
-  }, [theme.adminEmail]); // Removido location para evitar re-init desnecessário
+  }, [theme.adminEmail]);
 
   const syncUser = async (email: string) => {
+    const emailLimpo = email.trim().toLowerCase();
+    console.log('App: syncUser iniciando para:', emailLimpo);
+    
     // Check if it's admin
-    if (email.toLowerCase() === theme.adminEmail.toLowerCase()) {
+    if (emailLimpo === theme.adminEmail.toLowerCase()) {
+      console.log('App: syncUser detectou admin');
       setUser({ id: 'admin', name: 'Master Admin', email, role: 'admin', status: 'active', accessType: 'lifetime', startDate: new Date().toISOString(), masterPurchaseDate: undefined, purchasedProducts: [] });
       return;
     }
 
-    // Fetch all sale data from 'sales' table for this email
-    const emailLimpo = email.trim().toLowerCase();
-    const { data: salesData } = await supabase
-      .from('sales')
-      .select('*')
-      .or(`email.eq.${emailLimpo},e-mail.eq.${emailLimpo}`);
+    try {
+      // Fetch all sale data from 'sales' table for this email
+      console.log('App: syncUser buscando na tabela sales...');
+      
+      const salesPromise = supabase
+        .from('sales')
+        .select('*')
+        .or(`email.eq.${emailLimpo},e-mail.eq.${emailLimpo}`);
+        
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout ao buscar dados de vendas')), 8000)
+      );
+
+      const { data: salesData, error: salesError } = await Promise.race([salesPromise, timeoutPromise]) as any;
+      
+      if (salesError && salesError.code !== 'PGRST116') {
+        console.error('App: Erro ao buscar salesData:', salesError);
+      }
+
+      console.log('App: syncUser salesData recebido:', salesData?.length || 0, 'registros');
     
     if (salesData && salesData.length > 0) {
       // Use the first record for basic info (name, status, etc)
@@ -2011,28 +2006,76 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         purchasedProducts: []
       });
     }
+    } catch (err: any) {
+      console.error('App: Erro fatal no syncUser:', err);
+    }
+  };
+
+  const loadSales = async () => {
+    try {
+      console.log('App: Carregando lista completa de clientes (admin)...');
+      const { data: sRes, error } = await supabase.from('sales').select('*');
+      if (error) throw error;
+
+      if (sRes) {
+        const clientsMap = new Map<string, User>();
+        sRes.forEach((sale: any) => {
+          const email = (sale.email || sale["e-mail"] || "").toLowerCase();
+          const isSaleActive = ['ativo', 'approved', 'complete', 'active', 'aprovado', 'pago', 'finalizado', 'concluido'].includes(String(sale.status || '').toLowerCase());
+          
+          if (!clientsMap.has(email)) {
+            clientsMap.set(email, {
+              id: email,
+              name: sale.name || sale.nome || 'Usuário',
+              email: email,
+              role: 'user',
+              status: isSaleActive ? 'active' : 'suspended',
+              accessType: '1year',
+              startDate: sale.created_at || sale.criado_em,
+              expiryDate: sale.expires_at || sale.expira_em,
+              purchasedProducts: []
+            });
+          } else {
+            const existing = clientsMap.get(email)!;
+            if (isSaleActive) existing.status = 'active';
+          }
+
+          const client = clientsMap.get(email)!;
+          if (sale.product_id || sale.id_do_produto) {
+            client.purchasedProducts.push({
+              productId: String(sale.product_id || sale.id_do_produto),
+              purchaseDate: sale.purchase_date || sale.created_at || sale.criado_em
+            });
+          }
+        });
+        setClients(Array.from(clientsMap.values()));
+      }
+    } catch (err) {
+      console.error('Erro ao carregar vendas:', err);
+    }
   };
 
   const value = {
     user, setUser, products, clients, theme, loading, notices, banners, allCategories,
-    saveProduct: async (p: Product) => { 
+    userProfile, setUserProfile,
+    saveProduct: async (p: Product) => {
       try {
-        const id = p.id || `prod-${Date.now()}`; 
+        const id = p.id || `prod-${Date.now()}`;
         const { error } = await supabase.from('products').upsert({ id, data: { ...p, id } }, { onConflict: 'id' });
         if (error) throw error;
-        await loadData(); 
-        notify('Produto salvo com sucesso!', 'success'); 
+        await loadData();
+        notify('Produto salvo!', 'success');
       } catch (err: any) {
         console.error('Error saving product:', err);
         notify(`Erro ao salvar produto: ${err.message || 'Erro desconhecido'}`, 'error');
       }
     },
-    deleteProduct: async (id: string) => { 
+    deleteProduct: async (id: string) => {
       try {
-        const { error } = await supabase.from('products').delete().eq('id', id); 
+        const { error } = await supabase.from('products').delete().eq('id', id);
         if (error) throw error;
-        await loadData(); 
-        notify('Produto removido.', 'success'); 
+        await loadData();
+        notify('Produto removido.', 'success');
       } catch (err: any) {
         console.error('Error deleting product:', err);
         notify('Erro ao remover produto.', 'error');
@@ -2040,115 +2083,73 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     },
     saveClient: async (c: User) => { 
       console.log('Iniciando saveClient para:', c.email);
-      
       try {
         const cleanEmail = c.email?.trim().toLowerCase();
         if (!cleanEmail) throw new Error('E-mail é obrigatório');
-
-        // 1. Remover todos os registros atuais deste e-mail
-        console.log('Removendo registros antigos de:', cleanEmail);
         const { error: deleteError } = await supabase.from('sales').delete().eq('email', cleanEmail);
-        
-        if (deleteError) {
-          console.error('Erro ao deletar registros antigos:', deleteError);
-          throw deleteError;
-        }
-
-        // 2. Preparar dados para inserção
+        if (deleteError) throw deleteError;
         const status = c.status === 'active' ? 'ativo' : 'suspenso';
         const expiryDate = c.expiryDate || calculateExpiryDate(c.startDate, c.accessType);
         const createdAt = c.startDate || new Date().toISOString();
-
         let insertPromise;
         if (!c.purchasedProducts || c.purchasedProducts.length === 0) {
-          console.log('Inserindo registro básico (sem produtos)');
           insertPromise = supabase.from('sales').insert({
-            email: cleanEmail,
-            name: c.name,
-            status,
-            expires_at: expiryDate,
-            created_at: createdAt,
-            product_id: 'VAZIO'
+            email: cleanEmail, name: c.name, status, expires_at: expiryDate, created_at: createdAt, product_id: 'VAZIO'
           });
         } else {
-          console.log('Inserindo múltiplos registros para produtos:', c.purchasedProducts.length);
           const salesToInsert = c.purchasedProducts.map(pp => ({
-            email: cleanEmail,
-            name: c.name,
-            status,
-            expires_at: expiryDate,
-            product_id: pp.productId,
-            created_at: pp.purchaseDate || createdAt
+            email: cleanEmail, name: c.name, status, expires_at: expiryDate, product_id: pp.productId, created_at: pp.purchaseDate || createdAt
           }));
           insertPromise = supabase.from('sales').insert(salesToInsert);
         }
-
         const { error: insertError } = await insertPromise;
-        if (insertError) {
-          console.error('Erro detalhado na inserção:', insertError);
-          if (insertError.code === '23505') {
-            throw new Error('Conflito de dados. Tente novamente.');
-          }
-          throw insertError;
-        }
-
-        console.log('Salvamento concluído no banco, recarregando dados...');
-        try {
-          await loadData(); 
-        } catch (loadErr) {
-          console.warn('Dados salvos, mas houve erro ao recarregar a lista:', loadErr);
-        }
-        
-        notify('Cliente e acessos salvos com sucesso!', 'success'); 
+        if (insertError) throw insertError;
+        await loadSales(); 
+        notify('Cliente salvo com sucesso!', 'success'); 
       } catch (err: any) {
-        console.error('Falha crítica no saveClient:', err);
+        console.error('Falha no saveClient:', err);
         notify(`Erro ao salvar: ${err.message || 'Erro de conexão'}`, 'error');
         throw err; 
       }
     },
     deleteClient: async (email: string) => { 
       try {
-        // Tenta deletar usando ambas as colunas possíveis
         const { error: err1 } = await supabase.from('sales').delete().eq('email', email); 
         const { error: err2 } = await supabase.from('sales').delete().eq('e-mail', email); 
-        
         if (err1 && err2) throw err1;
-        
-        await loadData(); 
+        await loadSales(); 
         notify('Cliente removido.', 'success'); 
       } catch (err: any) {
         console.error('Error deleting client:', err);
         notify('Erro ao remover cliente.', 'error');
       }
     },
-    saveBanners: async (b: PromotionBanner[]) => { 
+    saveBanners: async (b: PromotionBanner[]) => {
       try {
-        const { error } = await supabase.from('settings').upsert({ key: 'banners_carousel', value: b }, { onConflict: 'key' }); 
+        const { error } = await supabase.from('settings').upsert({ key: 'banners_carousel', value: b }, { onConflict: 'key' });
         if (error) throw error;
-        await loadData(); 
-        notify('Banners salvos!', 'success'); 
+        await loadData();
+        notify('Banners salvos!', 'success');
       } catch (err: any) {
         console.error('Error saving banners:', err);
-        notify(`Erro ao salvar banners: ${err.message || ''}`, 'error');
+        notify('Erro ao salvar banners.', 'error');
       }
     },
-    setTheme: async () => { 
+    setTheme: async () => {
       try {
         const { error } = await supabase.from('settings').upsert({ key: 'theme', value: theme }, { onConflict: 'key' });
         if (error) throw error;
-        await loadData();
-        notify('Estilo aplicado com sucesso!', 'success'); 
+        notify('Tema salvo!', 'success');
       } catch (err: any) {
         console.error('Error saving theme:', err);
-        notify(`Erro ao salvar estilo: ${err.message || ''}`, 'error');
+        notify('Erro ao salvar tema.', 'error');
       }
     },
     setThemeState,
-    logout: async () => { 
-      // Clear state immediately to provide instant feedback
-      setUser(null); 
-      localStorage.removeItem('bs_auth_user');
-      
+    webhookLogs: [],
+    addLog: async () => {},
+    logout: async () => {
+      console.log('App: Realizando logout...');
       try {
         // Don't await this to avoid blocking the UI if it hangs
         supabase.auth.signOut().catch(e => console.error('Logout error:', e));
@@ -2160,6 +2161,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       // Force navigation to home
       window.location.href = "/";
     },
+    loadSales,
     signIn: async (email: string, pass: string) => {
       await authLogin(email, pass);
     },
@@ -2175,7 +2177,14 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     concluirPrimeiroAcesso: async (email: string, senha: string, nome?: string) => {
       return await concluirPrimeiroAcesso(email, senha, nome);
     },
-    notify, refreshData: loadData,
+    notify, 
+    refreshData: async () => {
+      await loadData();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email?.toLowerCase() === theme.adminEmail.toLowerCase()) {
+        await loadSales();
+      }
+    },
     saveNotice: async (n: Notice) => { 
       try {
         const id = n.id || `notice-${Date.now()}`; 
@@ -2237,21 +2246,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         setLoading(false);
       }
     },
-    checkDatabase: async () => {
-      const tables = ['products', 'sales', 'settings', 'notices'];
-      const results: Record<string, boolean> = {};
-      
-      for (const table of tables) {
-        try {
-          const { error } = await supabase.from(table).select('*').limit(1);
-          results[table] = !error;
-          if (error) console.warn(`Table ${table} check failed:`, error.message);
-        } catch (e) {
-          results[table] = false;
-        }
-      }
-      return results;
-    }
+    checkDatabase,
   };
 
   return (<AppContext.Provider value={value}>{children}<div className="fixed bottom-10 right-10 z-[300] flex flex-col gap-4">{toasts.map(t => (<div key={t.id} className={`px-10 py-5 rounded-full shadow-2xl flex items-center gap-4 animate-in slide-in-from-right-10 border bg-black text-white ${t.type === 'success' ? 'border-emerald-500' : 'border-red-500'}`}>{t.type === 'success' ? <Check size={18} /> : <AlertCircle size={18} />}<span className="text-[10px] font-black uppercase tracking-widest">{t.message}</span></div>))}</div></AppContext.Provider>);

@@ -260,13 +260,19 @@ export const concluirPrimeiroAcesso = async (email: string, senha: string, nome?
  * Realiza o login puro no Supabase Auth
  */
 export const login = async (email: string, senha: string) => {
+  console.log('authService: Iniciando signInWithPassword para:', email);
   // Tentar login no Auth sem travas de tabela sales
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password: senha,
   });
 
-  if (error) throw error;
+  if (error) {
+    console.error('authService: Erro no signInWithPassword:', error);
+    throw error;
+  }
+  
+  console.log('authService: signInWithPassword concluído com sucesso para:', data.user?.email);
   return data;
 };
 
