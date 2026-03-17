@@ -61,13 +61,15 @@ export const Login = () => {
     try {
       console.log('Login: Iniciando signIn para:', eTrim);
       
-      // Timeout de 15 segundos para o login
+      // Timeout de 30 segundos para o login (aumentado de 15s para evitar falsos positivos em conexões lentas)
       const loginPromise = signIn(eTrim, password);
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Tempo de resposta excedido. Verifique sua conexão.')), 15000)
+        setTimeout(() => reject(new Error('Tempo de resposta excedido. Verifique sua conexão ou tente novamente em alguns instantes.')), 30000)
       );
 
+      console.time('login-timer');
       await Promise.race([loginPromise, timeoutPromise]);
+      console.timeEnd('login-timer');
       console.log('Login: signIn concluído com sucesso');
       
       if (eTrim === theme.adminEmail.toLowerCase()) {

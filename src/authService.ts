@@ -1,138 +1,73 @@
 import { supabase } from './supabaseClient';
 
-const ALLOWED_PRODUCT_IDS = ['7185103', '2865044'];
-const MAIN_PRODUCT_ID = ALLOWED_PRODUCT_IDS[0];
-
-const isAllowedProduct = (id: any) => {
-  const cleanId = String(id || '').trim();
-  return ALLOWED_PRODUCT_IDS.includes(cleanId) || ALLOWED_PRODUCT_IDS.includes(String(parseInt(cleanId)));
-};
+// Lista de status considerados ativos para liberação de acesso
+export const ACTIVE_STATUSES = [
+  'ativo', 'approved', 'pago', 'concluido', 'complete',
+  'ativa', 'active', 'aprovado', 'aprovada', 'completo', 'completa',
+  'paga', 'finalizado', 'finalizada', 'concluida', 'disponivel', 'disponível'
+];
 
 /**
- * Verifica se o usuário possui acesso ativo ao produto principal
+ * Verifica se um e-mail possui acesso ativo no sistema
  */
 export const hasAccess = async (email: string) => {
   const emailLimpo = email.trim().toLowerCase();
-  console.log('Iniciando hasAccess para:', emailLimpo);
-  
-  try {
-    // Buscamos todas as vendas deste e-mail para filtrar no JS, 
-    // evitando problemas com colunas inexistentes no .or()
-    let sales: any[] = [];
-    
-    // Tenta buscar pela coluna 'email'
-    const { data: salesEmail, error: errorEmail } = await supabase
-      .from('sales')
-      .select('*')
-      .eq('email', emailLimpo);
-      
-    if (salesEmail) sales = [...sales, ...salesEmail];
-    
-    // Tenta buscar pela coluna 'e-mail' (fallback comum em imports)
-    const { data: salesEmailAlt, error: errorEmailAlt } = await supabase
-      .from('sales')
-      .select('*')
-      .eq('e-mail', emailLimpo);
-      
-    if (salesEmailAlt) sales = [...sales, ...salesEmailAlt];
+  console.log("USER EMAIL:", emailLimpo);
 
-    if (sales.length === 0) {
-      console.log('Nenhuma venda encontrada para o e-mail:', emailLimpo);
-      return false;
+  try {
+    // Busca todas as vendas para o e-mail com status ativo
+    const { data: sales, error } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('email', emailLimpo)
+      .in('status', ['ativo', 'approved', 'pago', 'concluido', 'complete']);
+
+    console.log("SALES FOUND:", sales);
+
+    if (error) {
+      // Tentar fallback para 'e-mail'
+      if (error.message.includes('column "email" does not exist')) {
+        const { data: fallbackSales, error: fallbackError } = await supabase
+          .from('sales')
+          .select('*')
+          .eq('e-mail', emailLimpo)
+          .in('status', ['ativo', 'approved', 'pago', 'concluido', 'complete']);
+        
+        if (fallbackError) throw fallbackError;
+        if (fallbackSales && fallbackSales.length > 0) return true;
+      }
+      throw error;
     }
 
-    console.log(`Encontradas ${sales.length} vendas para ${emailLimpo}. Exemplo de campos:`, Object.keys(sales[0]));
-    console.log(`Verificando produtos permitidos: ${ALLOWED_PRODUCT_IDS.join(', ')}...`);
+    if (sales && sales.length > 0) {
+      return true;
+    }
 
-    // Verifica status e expiração para os produtos permitidos
-    return sales.some(sale => {
-      const pId = String(sale.product_id || sale.id_do_produto || '').trim();
-      const isMainProduct = isAllowedProduct(pId);
-      
-      if (!isMainProduct) return false;
-
-      const status = String(sale.status || '').toLowerCase();
-      const expiresAt = sale.expires_at || sale.expira_em;
-      
-      const activeStatuses = ['ativo', 'approved', 'complete', 'active', 'aprovado', 'pago', 'finalizado', 'concluido'];
-      const isActive = activeStatuses.includes(status);
-      const isNotExpired = !expiresAt || new Date() <= new Date(expiresAt);
-      
-      return isActive && isNotExpired;
-    });
+    console.log('authService: Nenhuma venda ativa ou válida encontrada.');
+    return false;
   } catch (err) {
-    console.error('Erro em hasAccess:', err);
+    console.error('authService: Erro em hasAccess:', err);
     return false;
   }
 };
 
 /**
- * Verifica se o e-mail tem permissão para acessar o sistema
- * Regra: Deve possuir acesso ativo ao produto principal (7185103)
+ * Valida permissão de acesso e lança erro detalhado se negado
  */
 export const verificarPermissao = async (email: string, adminEmail?: string) => {
   const emailLimpo = email.trim().toLowerCase();
   const hardcodedAdmin = 'sertanejopremiercontato@gmail.com';
-  
-  // BYPASS: Se for o e-mail do administrador, permite sempre
-  const isEmailAdmin = emailLimpo === hardcodedAdmin || 
-                       (adminEmail && emailLimpo === adminEmail.toLowerCase());
-  
-  console.log('Verificando isEmailAdmin (verificarPermissao):', { emailLimpo, hardcodedAdmin, adminEmail, isEmailAdmin });
+  const isEmailAdmin = emailLimpo === hardcodedAdmin || (adminEmail && emailLimpo === adminEmail.toLowerCase());
 
   if (isEmailAdmin) {
     console.log('Bypass de administrador (verificarPermissao) para:', emailLimpo);
     return true;
   }
 
-  console.log('Verificando permissão para:', emailLimpo);
-
-  const temAcesso = await hasAccess(emailLimpo);
-
-  if (!temAcesso) {
-    console.log('Acesso negado para:', emailLimpo, '. Verificando se o e-mail existe na base...');
-    
-    // Busca informações para dar um erro mais preciso, tentando ambas as colunas
-    let anySales: any[] = [];
-    
-    const { data: s1 } = await supabase.from('sales').select('*').eq('email', emailLimpo);
-    if (s1) anySales = [...anySales, ...s1];
-    
-    const { data: s2 } = await supabase.from('sales').select('*').eq('e-mail', emailLimpo);
-    if (s2) anySales = [...anySales, ...s2];
-
-    if (anySales.length === 0) {
-      console.error('E-mail não encontrado em nenhuma coluna de vendas:', emailLimpo);
-      throw new Error('E-mail não encontrado na base de compradores. Verifique se sua compra foi aprovada ou se usou o mesmo e-mail da Hotmart.');
-    }
-
-    // Verifica se existe algum produto permitido em qualquer uma das vendas encontradas
-    const hasMainProduct = anySales.some(s => isAllowedProduct(s.product_id || s.id_do_produto));
-
-    if (!hasMainProduct) {
-      const foundIds = anySales.map(s => s.product_id || s.id_do_produto).filter(Boolean).join(', ');
-      throw new Error(`Seu e-mail foi encontrado, mas não está vinculado a um produto válido (${ALLOWED_PRODUCT_IDS.join(' ou ')}). Produtos encontrados: ${foundIds || 'Nenhum ID'}`);
-    }
-
-    // Se chegou aqui, tem um produto permitido, mas temAcesso foi false.
-    // Pode ser status ou expiração.
-    const mainProductSales = anySales.filter(s => isAllowedProduct(s.product_id || s.id_do_produto));
-
-    const isSuspended = mainProductSales.some(s => String(s.status || '').toLowerCase() === 'suspenso');
-    if (isSuspended) {
-      throw new Error('Seu acesso está suspenso. Entre em contato com o suporte.');
-    }
-
-    const isExpired = mainProductSales.every(s => {
-      const expiresAt = s.expires_at || s.expira_em;
-      return expiresAt && new Date() > new Date(expiresAt);
-    });
-    
-    if (isExpired) {
-      throw new Error('Sua assinatura do produto principal expirou.');
-    }
-
-    throw new Error('Você não possui uma assinatura ativa do produto principal ou seu acesso expirou.');
+  const access = await hasAccess(emailLimpo);
+  
+  if (!access) {
+    throw new Error('ACESSO RESTRITO: Não encontramos uma assinatura ativa para este e-mail.');
   }
 
   return true;
@@ -276,93 +211,3 @@ export const login = async (email: string, senha: string) => {
   return data;
 };
 
-/**
- * Verifica se o usuário logado ainda possui status ativo no produto principal
- */
-export const verificarStatusAtivo = async (email: string, adminEmail?: string) => {
-  const emailLimpo = email.trim().toLowerCase();
-  const hardcodedAdmin = 'sertanejopremiercontato@gmail.com';
-
-  // BYPASS: Se for o e-mail do administrador, permite sempre
-  const isEmailAdmin = emailLimpo === hardcodedAdmin || 
-                       (adminEmail && emailLimpo === adminEmail.toLowerCase());
-  
-  if (isEmailAdmin) return true;
-
-  return await hasAccess(emailLimpo);
-};
-
-/**
- * Busca os produtos vinculados ao produto principal e calcula o status de liberação
- * com base na data de compra e nos dias de carência (release_days).
- */
-export const getProductsForUser = async (email: string) => {
-  const emailLimpo = email.trim().toLowerCase();
-
-  // 1. Buscar a data de compra de um produto permitido na tabela sales
-  const { data: sales, error: salesError } = await supabase
-    .from('sales')
-    .select('*')
-    .or(`email.eq.${emailLimpo},e-mail.eq.${emailLimpo}`);
-
-  const filteredSales = (sales || []).filter(s => isAllowedProduct(s.product_id || s.id_do_produto));
-
-  if (salesError || !filteredSales || filteredSales.length === 0) {
-    console.log('Nenhuma venda encontrada para o cálculo de liberação:', emailLimpo);
-    return [];
-  }
-
-  // Pegamos a venda ativa de qualquer produto permitido
-  const activeStatuses = ['ativo', 'approved', 'complete', 'active', 'aprovado', 'pago', 'finalizado', 'concluido'];
-  const mainSale = filteredSales.find(s => 
-    isAllowedProduct(s.product_id || s.id_do_produto) && 
-    (activeStatuses.includes(String(s.status || '').toLowerCase()))
-  );
-
-  if (!mainSale) {
-    console.log('Venda de produto permitido não está ativa para:', emailLimpo);
-    return [];
-  }
-
-  // Usamos purchase_date ou created_at como base
-  const purchaseDateStr = mainSale.purchase_date || mainSale.created_at || mainSale.criado_em;
-  if (!purchaseDateStr) {
-    console.error('Data de compra não encontrada para:', emailLimpo);
-    return [];
-  }
-  
-  const purchaseDate = new Date(purchaseDateStr);
-
-  // 2. Buscar produtos vinculados na tabela products
-  const { data: productsData, error: productsError } = await supabase
-    .from('products')
-    .select('*')
-    .in('parent_product_id', ALLOWED_PRODUCT_IDS);
-
-  if (productsError || !productsData) {
-    console.error('Erro ao buscar produtos vinculados:', productsError);
-    return [];
-  }
-
-  // 3. Calcular status de liberação para cada produto
-  const now = new Date();
-  
-  return productsData.map(item => {
-    // Lida com a possibilidade dos dados estarem em uma coluna 'data' ou diretamente na linha
-    const product = item.data || item.value || item;
-    const releaseDays = product.release_days || 0;
-    
-    const releaseDate = new Date(purchaseDate);
-    releaseDate.setDate(releaseDate.getDate() + releaseDays);
-
-    const isUnlocked = now >= releaseDate;
-
-    return {
-      id: product.id || item.id,
-      title: product.title || product.name || 'Produto sem título',
-      status: isUnlocked ? 'unlocked' : 'locked',
-      releaseDate: releaseDate.toISOString(),
-      daysRemaining: Math.max(0, Math.ceil((releaseDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
-    };
-  });
-};

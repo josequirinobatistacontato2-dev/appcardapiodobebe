@@ -3,7 +3,7 @@ console.log('App.tsx: Arquivo carregado');
 import { Routes, Route, Navigate, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import { supabase } from './supabaseClient';
-import { verificarVendaParaPrimeiroAcesso, concluirPrimeiroAcesso, login as authLogin, verificarStatusAtivo, verificarPermissao, solicitarResetSenha, atualizarSenha } from './authService';
+import { verificarVendaParaPrimeiroAcesso, concluirPrimeiroAcesso, login as authLogin, verificarPermissao, solicitarResetSenha, atualizarSenha, ACTIVE_STATUSES } from './authService';
 import { 
   AlertCircle,
   RefreshCw,
@@ -69,25 +69,18 @@ import { isProductUnlocked } from './utils';
 // CONFIGURAÇÕES E SETUP SUPABASE
 // ==========================================
 
-const ALLOWED_PRODUCT_IDS = ['7185103', '2865044'];
-const MAIN_PRODUCT_ID = ALLOWED_PRODUCT_IDS[0];
-const isAllowedProduct = (id: any) => {
-  const cleanId = String(id || '').trim();
-  return ALLOWED_PRODUCT_IDS.includes(cleanId) || ALLOWED_PRODUCT_IDS.includes(String(parseInt(cleanId)));
-};
-
 try {
   GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@5.4.624/build/pdf.worker.min.mjs';
 } catch (e) {
   console.error('Erro ao configurar PDF worker:', e);
 }
 
-const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: boolean = false, masterPurchaseDate?: string) => {
+const getReleaseStatus = (product: Product, isAdmin: boolean = false, masterPurchaseDate?: string) => {
   const now = new Date();
   const pData = product.data;
   
-  // Se o usuário tiver qualquer venda ativa, usamos a data de compra dela como base para todos os produtos
-  const effectivePurchaseDate = purchaseDate || masterPurchaseDate;
+  // O acesso e liberação agora dependem apenas da data da compra principal (masterPurchaseDate)
+  const effectivePurchaseDate = masterPurchaseDate;
   
   // Debug log para ajudar a identificar problemas de liberação
   if (effectivePurchaseDate) {
@@ -207,6 +200,8 @@ interface AppContextType {
   verificarVendaParaPrimeiroAcesso: (email: string) => Promise<boolean>;
   concluirPrimeiroAcesso: (email: string, senha: string, nome?: string) => Promise<any>;
   loading: boolean;
+  loadingUser: boolean;
+  loadingSales: boolean;
   notify: (message: string, type: 'success' | 'error') => void;
   refreshData: () => Promise<void>;
   seedTestData: () => Promise<void>;
@@ -251,11 +246,22 @@ function NoAccessScreen({ isExpired }: { isExpired?: boolean }) {
               ? 'Sua assinatura do Cardápio do Bebê Saudável expirou. Renove seu acesso para continuar aproveitando nossos conteúdos exclusivos.'
               : `Olá! Identificamos que você ainda não possui uma assinatura ativa do Cardápio do Bebê Saudável vinculada ao e-mail ${user?.email || ''}.`}
           </p>
+          {user && user.status === 'no-access' && (
+            <div className="mt-2 text-[10px] text-stone-400 font-mono">
+              Status: {user.status} | Email: {user.email}
+            </div>
+          )}
           <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100 text-xs font-bold text-stone-400 uppercase tracking-widest">
             {isExpired ? 'Renove agora e não perca nada' : 'Verifique se usou o mesmo e-mail da Hotmart'}
           </div>
         </div>
         <div className="space-y-4 pt-4">
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full py-4 bg-stone-100 text-stone-600 rounded-full font-black text-[10px] uppercase tracking-widest hover:bg-stone-200 transition-all flex items-center justify-center gap-2"
+          >
+            TENTAR NOVAMENTE <RefreshCw size={14} />
+          </button>
           <a 
             href={theme.externalSiteUrl || "https://appcardapiodobebe.com"} 
             target="_blank" 
@@ -277,9 +283,19 @@ function NoAccessScreen({ isExpired }: { isExpired?: boolean }) {
 }
 
 function DashboardView() {
-  const { products, user, theme, notices, banners, allCategories } = useApp();
+  const { products, user, theme, notices, banners, allCategories, loadingUser, loadingSales } = useApp();
   const [currentBanner, setCurrentBanner] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
+  // Se estiver carregando usuário ou vendas, mostra o loader
+  if (loadingUser || loadingSales) {
+    return (
+      <div className="h-screen bg-stone-950 flex flex-col items-center justify-center gap-4">
+        <Loader2 className="animate-spin text-white" />
+        <p className="text-white/50 text-[10px] font-black uppercase tracking-widest">Validando Acesso...</p>
+      </div>
+    );
+  }
 
   // Se o usuário não tiver acesso ou estiver expirado, mostra a tela de bloqueio
   const isExpired = isAccessExpired(user);
@@ -426,9 +442,7 @@ function DashboardView() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 md:gap-6 lg:gap-8">
         {filteredProducts.map(p => {
-          const purchase = user?.purchasedProducts?.find(x => x.productId === p.data.id) || 
-                          (p.data.isBonus ? user?.purchasedProducts?.find(x => x.productId === p.data.parentId) : null);
-          const status = getReleaseStatus(p, purchase?.purchaseDate, user?.role === 'admin', user?.masterPurchaseDate);
+          const status = getReleaseStatus(p, user?.role === 'admin', user?.masterPurchaseDate);
           return (
             <Link 
               key={p.id} 
@@ -1727,6 +1741,8 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [banners, setBanners] = useState<PromotionBanner[]>([]);
   const [theme, setThemeState] = useState<ThemeSettings>(DEFAULT_THEME);
   const [loading, setLoading] = useState(true);
+  const [loadingUser, setLoadingUser] = useState(true);
+  const [loadingSales, setLoadingSales] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const allCategories = useMemo(() => {
@@ -1819,14 +1835,19 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
     const initAuth = async () => {
       console.log('App: Iniciando initAuth...');
+      setLoadingUser(true);
+      setLoadingSales(true);
+      setLoading(true);
       
       // Safety timeout to prevent infinite loading
       const timeoutId = setTimeout(() => {
         if (loading) {
           console.warn('App: initAuth demorando demais, forçando fim do loading...');
           setLoading(false);
+          setLoadingUser(false);
+          setLoadingSales(false);
         }
-      }, 10000);
+      }, 15000);
 
       try {
         setLoading(true);
@@ -1858,16 +1879,24 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           console.log('App: Redirecionando para:', targetPath);
           navigate(targetPath, { replace: true });
           setLoading(false);
+          setLoadingUser(false);
+          setLoadingSales(false);
           return;
         }
 
         await loadData();
         
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+        console.log('App: getUser result:', authUser?.email, 'Error:', authError);
         
-        if (session?.user) {
-          await syncUser(session.user.email!);
+        if (authUser) {
+          console.log('App: Usuário autenticado encontrado, sincronizando...');
+          setLoadingUser(false);
+          await syncUser(authUser.email!);
         } else {
+          console.log('App: Nenhum usuário autenticado no getUser, verificando localStorage...');
+          setLoadingUser(false);
+          setLoadingSales(false);
           const saved = localStorage.getItem('bs_auth_user');
           if (saved) {
             try {
@@ -1883,6 +1912,8 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       } finally {
         clearTimeout(timeoutId);
         setLoading(false);
+        setLoadingUser(false);
+        setLoadingSales(false);
       }
     };
 
@@ -1909,10 +1940,22 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
         console.log('App: Usuário detectado na sessão, iniciando sincronização');
         try {
+          // Se for um evento de login ou mudança de estado, garantimos o loading
+          if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+            setLoading(true);
+            setLoadingUser(true);
+            setLoadingSales(true);
+          }
+          
+          setLoadingUser(false);
           await syncUser(session.user.email!);
           console.log('App: Sincronização concluída para:', session.user.email);
         } catch (err: any) {
           console.error('App: Erro ao sincronizar usuário:', err.message);
+        } finally {
+          setLoading(false);
+          setLoadingUser(false);
+          setLoadingSales(false);
         }
       } else {
         console.log('App: Nenhum usuário na sessão');
@@ -1928,117 +1971,117 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const syncUser = async (email: string) => {
     const emailLimpo = email.trim().toLowerCase();
-    console.log('App: syncUser iniciando para:', emailLimpo);
+    console.log("USER EMAIL:", emailLimpo);
     
     // Check if it's admin
     if (emailLimpo === theme.adminEmail.toLowerCase()) {
-      console.log('App: syncUser detectou admin');
       setUser({ id: 'admin', name: 'Master Admin', email, role: 'admin', status: 'active', accessType: 'lifetime', startDate: new Date().toISOString(), masterPurchaseDate: undefined, purchasedProducts: [] });
+      setLoadingSales(false);
       return;
     }
 
     try {
-      // Fetch all sale data from 'sales' table for this email
-      console.log('App: syncUser buscando na tabela sales...');
+      setLoadingSales(true);
+      setLoading(true);
       
-      const salesPromise = supabase
+      // 1. Consulta principal: e-mail e status ativo (conforme solicitado)
+      const { data: sales, error: salesError } = await supabase
         .from('sales')
         .select('*')
-        .or(`email.ilike.%${emailLimpo}%,e-mail.ilike.%${emailLimpo}%`);
+        .eq('email', emailLimpo)
+        .in('status', ['ativo', 'approved', 'pago', 'concluido', 'complete']);
         
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout ao buscar dados de vendas')), 8000)
-      );
+      console.log("SALES FOUND:", sales);
 
-      const { data: rawSales, error: salesError } = await Promise.race([salesPromise, timeoutPromise]) as any;
-      
-      if (salesError && salesError.code !== 'PGRST116') {
-        console.error('App: Erro ao buscar salesData:', salesError);
+      if (salesError) {
+        console.error('App: Erro na consulta de vendas:', salesError.message);
+        // Fallback para 'e-mail' se 'email' falhar
+        if (salesError.message.includes('column "email" does not exist')) {
+          const { data: fallbackData } = await supabase
+            .from('sales')
+            .select('*')
+            .eq('e-mail', emailLimpo)
+            .in('status', ['ativo', 'approved', 'pago', 'concluido', 'complete']);
+          
+          if (fallbackData && fallbackData.length > 0) {
+            processSales(fallbackData);
+            return;
+          }
+        }
       }
 
-      // Filtrar no JS para garantir match exato (ignorando espaços e case)
-      const salesData = rawSales?.filter((s: any) => {
-        const sEmail = (s.email || s["e-mail"] || "").trim().toLowerCase();
-        return sEmail === emailLimpo;
-      }) || [];
-
-      console.log('App: syncUser salesData recebido:', salesData.length, 'registros');
-    
-    if (salesData.length > 0) {
-      // Ordenar todas as vendas por data decrescente para pegar a mais recente como primária
-      const sortedSales = [...salesData].sort((a, b) => {
-        const dateA = new Date(a.purchase_date || a.created_at || a.criado_em || 0).getTime();
-        const dateB = new Date(b.purchase_date || b.created_at || b.criado_em || 0).getTime();
-        return dateB - dateA;
-      });
-
-      const primaryData = sortedSales[0];
-      
-      // Map all sales records to purchasedProducts array
-      const purchasedProducts = salesData
-        .filter(sale => sale.product_id || sale.id_do_produto)
-        .map(sale => ({
-          productId: String(sale.product_id || sale.id_do_produto),
-          purchaseDate: sale.purchase_date || sale.created_at || sale.criado_em
-        }));
-
-      const activeStatuses = [
-        'ativo', 'ativa', 'active', 
-        'approved', 'aprovado', 'aprovada', 
-        'complete', 'completo', 'completa', 
-        'pago', 'paga', 
-        'finalizado', 'finalizada', 
-        'concluido', 'concluida', 
-        'disponivel', 'disponível'
-      ];
-
-      // Encontrar a data de compra de QUALQUER venda ativa para servir de base
-      const activeSales = salesData.filter(sale => {
-        const s = String(sale.status || '').toLowerCase().trim();
-        return activeStatuses.includes(s);
-      }).sort((a, b) => {
-        const dateA = new Date(a.purchase_date || a.created_at || a.criado_em || 0).getTime();
-        const dateB = new Date(b.purchase_date || b.created_at || b.criado_em || 0).getTime();
-        return dateA - dateB; // Ordem crescente (mais antigo primeiro para o masterPurchaseDate)
-      });
-
-      const masterPurchaseDate = activeSales.length > 0 
-        ? (activeSales[0].purchase_date || activeSales[0].created_at || activeSales[0].criado_em) 
-        : undefined;
-
-      // Determine overall user status (active if any sale is active)
-      const isAnyActive = activeSales.length > 0;
-
-      // Map flat sales data to User object
-      const mappedUser: User = {
-        id: (primaryData.email || primaryData["e-mail"]),
-        name: primaryData.name || primaryData.nome || 'Usuário',
-        email: (primaryData.email || primaryData["e-mail"]),
-        role: 'user',
-        status: isAnyActive ? 'active' : 'no-access',
-        accessType: '1year',
-        startDate: primaryData.created_at || primaryData.criado_em,
-        expiryDate: primaryData.expires_at || primaryData.expira_em,
-        masterPurchaseDate: masterPurchaseDate,
-        purchasedProducts: purchasedProducts
-      };
-      setUser(mappedUser);
-    } else {
-      // Se não encontrar na tabela sales, permite o login mas marca como sem acesso
-      setUser({
-        id: email,
-        name: 'Usuário',
-        email: email,
-        role: 'user',
-        status: 'no-access',
-        accessType: '1year',
-        startDate: new Date().toISOString(),
-        purchasedProducts: []
-      });
-    }
+      if (sales && sales.length > 0) {
+        processSales(sales);
+      } else {
+        setUser({
+          id: email,
+          name: 'Usuário',
+          email: email,
+          role: 'user',
+          status: 'no-access',
+          accessType: '1year',
+          startDate: new Date().toISOString(),
+          purchasedProducts: []
+        });
+      }
     } catch (err: any) {
       console.error('App: Erro fatal no syncUser:', err);
+    } finally {
+      setLoadingSales(false);
+      setLoading(false);
     }
+  };
+
+  const processSales = (salesData: any[]) => {
+    const email = salesData[0].email || salesData[0]["e-mail"];
+    // Ordenar todas as vendas por data decrescente para pegar a mais recente como primária
+    const sortedSales = [...salesData].sort((a, b) => {
+      const dateA = new Date(a.purchase_date || a.created_at || a.criado_em || 0).getTime();
+      const dateB = new Date(b.purchase_date || b.created_at || b.criado_em || 0).getTime();
+      return dateB - dateA;
+    });
+
+    const primaryData = sortedSales[0];
+    
+    // Map all sales records to purchasedProducts array
+    const purchasedProducts = salesData
+      .filter(sale => sale.product_id || sale.id_do_produto)
+      .map(sale => ({
+        productId: String(sale.product_id || sale.id_do_produto),
+        purchaseDate: sale.purchase_date || sale.created_at || sale.criado_em
+      }));
+
+    // Encontrar a data de compra de QUALQUER venda ativa para servir de base
+    const activeSales = salesData.filter(sale => {
+      const s = String(sale.status || '').toLowerCase().trim();
+      return ACTIVE_STATUSES.includes(s);
+    }).sort((a, b) => {
+      const dateA = new Date(a.purchase_date || a.created_at || a.criado_em || 0).getTime();
+      const dateB = new Date(b.purchase_date || b.created_at || b.criado_em || 0).getTime();
+      return dateA - dateB; // Ordem crescente (mais antigo primeiro para o masterPurchaseDate)
+    });
+
+    const masterPurchaseDate = activeSales.length > 0 
+      ? (activeSales[0].created_at || activeSales[0].criado_em || activeSales[0].purchase_date) 
+      : undefined;
+
+    // Determine overall user status (active if any sale is active)
+    const isAnyActive = activeSales.length > 0;
+
+    // Map flat sales data to User object
+    const mappedUser: User = {
+      id: email,
+      name: primaryData.name || primaryData.nome || 'Usuário',
+      email: email,
+      role: 'user',
+      status: isAnyActive ? 'active' : 'no-access',
+      accessType: '1year',
+      startDate: primaryData.created_at || primaryData.criado_em,
+      expiryDate: primaryData.expires_at || primaryData.expira_em,
+      masterPurchaseDate: masterPurchaseDate,
+      purchasedProducts: purchasedProducts
+    };
+    setUser(mappedUser);
   };
 
   const loadSales = async () => {
@@ -2193,7 +2236,14 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     },
     loadSales,
     signIn: async (email: string, pass: string) => {
-      await authLogin(email, pass);
+      console.log('App: Chamando authLogin para:', email);
+      try {
+        await authLogin(email, pass);
+        console.log('App: authLogin concluído para:', email);
+      } catch (err: any) {
+        console.error('App: Erro no authLogin:', err.message);
+        throw err;
+      }
     },
     solicitarResetSenha: async (email: string) => {
       await solicitarResetSenha(email);
@@ -2277,6 +2327,8 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       }
     },
     checkDatabase,
+    loadingUser,
+    loadingSales,
   };
 
   return (<AppContext.Provider value={value}>{children}<div className="fixed bottom-10 right-10 z-[300] flex flex-col gap-4">{toasts.map(t => (<div key={t.id} className={`px-10 py-5 rounded-full shadow-2xl flex items-center gap-4 animate-in slide-in-from-right-10 border bg-black text-white ${t.type === 'success' ? 'border-emerald-500' : 'border-red-500'}`}>{t.type === 'success' ? <Check size={18} /> : <AlertCircle size={18} />}<span className="text-[10px] font-black uppercase tracking-widest">{t.message}</span></div>))}</div></AppContext.Provider>);
@@ -2295,9 +2347,7 @@ const PDFViewerView = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const product = products.find(p => p.id === id);
-  const purchase = user?.purchasedProducts?.find(x => x.productId === product?.id) || 
-                  (product?.isBonus ? user?.purchasedProducts?.find(x => x.productId === product?.parentId) : null);
-  const status = product ? getReleaseStatus(product, purchase?.purchaseDate, user?.role === 'admin', user?.masterPurchaseDate) : { isReleased: false };
+  const status = product ? getReleaseStatus(product, user?.role === 'admin', user?.masterPurchaseDate) : { isReleased: false };
 
   useEffect(() => {
     if (!product?.pdfUrl) return;
@@ -2698,10 +2748,7 @@ function ContentGuard({ children }: { children: React.ReactNode }) {
         const product = products.find(p => p.id === id);
         if (!product) throw new Error('Produto não encontrado.');
 
-        const purchase = user.purchasedProducts?.find(x => x.productId === product.id) || 
-                        (product.isBonus ? user.purchasedProducts?.find(x => x.productId === product.parentId) : null);
-        
-        const status = getReleaseStatus(product, purchase?.purchaseDate, user.role === 'admin', user.masterPurchaseDate);
+        const status = getReleaseStatus(product, user.role === 'admin', user.masterPurchaseDate);
 
         if (!status.isReleased) {
           throw new Error(status.sub || 'Este conteúdo ainda não foi liberado para sua conta.');
@@ -2843,9 +2890,13 @@ function PWAWrapper({ children }: { children: React.ReactNode }) {
 }
 
 function ProtectedRoute({ children }: { children?: React.ReactNode }) { 
-  const { user, loading } = useApp(); 
+  const { user, loading, loadingUser, loadingSales } = useApp(); 
 
-  if (loading) return <div className="h-screen bg-stone-950 flex items-center justify-center"><Loader2 className="animate-spin text-white" /></div>; 
+  if (loading || loadingUser || loadingSales) return <div className="h-screen bg-stone-950 flex items-center justify-center"><Loader2 className="animate-spin text-white" /></div>; 
   return user ? <>{children}</> : <Navigate to="/" />; 
 }
-function AdminRoute({ children }: { children?: React.ReactNode }) { const { user, loading } = useApp(); if (loading) return <div className="h-screen bg-stone-950 flex items-center justify-center"><Loader2 className="animate-spin text-white" /></div>; return user?.role === 'admin' ? <>{children}</> : <Navigate to="/" />; }
+function AdminRoute({ children }: { children?: React.ReactNode }) { 
+  const { user, loading, loadingUser, loadingSales } = useApp(); 
+  if (loading || loadingUser || loadingSales) return <div className="h-screen bg-stone-950 flex items-center justify-center"><Loader2 className="animate-spin text-white" /></div>; 
+  return user?.role === 'admin' ? <>{children}</> : <Navigate to="/" />; 
+}
