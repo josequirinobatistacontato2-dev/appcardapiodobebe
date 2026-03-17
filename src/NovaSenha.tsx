@@ -18,24 +18,48 @@ export default function NovaSenha() {
 
     const checkSession = async () => {
       try {
+        // Verificar se há erro no hash (comum quando o link expira ou é inválido)
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const errorMsg = hashParams.get('error_description') || hashParams.get('error');
+        
+        if (errorMsg && isMounted) {
+          console.error('NovaSenha: Erro detectado no hash:', errorMsg);
+          setErro(errorMsg === 'Email link is invalid or has expired' 
+            ? 'O link de recuperação é inválido ou expirou. Por favor, solicite um novo.' 
+            : errorMsg);
+          setTentando(false);
+          return;
+        }
+
         let { data: { session } } = await supabase.auth.getSession();
         console.log('NovaSenha: Check session inicial:', !!session);
         
-        // Se não houver sessão mas houver hash, o Supabase pode estar processando
-        if (!session && window.location.hash.includes('access_token=')) {
-          console.log('NovaSenha: Hash detectado mas sem sessão, aguardando processamento...');
-          await new Promise(resolve => setTimeout(resolve, 1500));
-          const { data: { session: retrySession } } = await supabase.auth.getSession();
-          session = retrySession;
-          console.log('NovaSenha: Check session após espera:', !!session);
+        // Se não houver sessão mas houver hash de token, aguardar o processamento do Supabase
+        const hasToken = window.location.hash.includes('access_token=') || 
+                         window.location.hash.includes('recovery_token=') ||
+                         window.location.search.includes('code=');
+
+        if (!session && hasToken) {
+          console.log('NovaSenha: Token detectado mas sem sessão, aguardando processamento...');
+          // Tentar várias vezes em intervalos curtos
+          for (let i = 0; i < 5; i++) {
+            await new Promise(resolve => setTimeout(resolve, 800));
+            const { data: { session: retrySession } } = await supabase.auth.getSession();
+            if (retrySession) {
+              session = retrySession;
+              console.log('NovaSenha: Sessão encontrada na tentativa', i + 1);
+              break;
+            }
+          }
         }
 
         if (session && isMounted) {
           setSessaoValida(true);
           setTentando(false);
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error('NovaSenha: Error checking session:', e);
+        if (isMounted) setErro(e.message || 'Erro ao verificar sessão');
       }
     };
 
@@ -53,13 +77,14 @@ export default function NovaSenha() {
       }
     });
 
-    // Timer de segurança caso o evento não dispare
+    // Timer de segurança caso o evento não dispare e não encontre sessão
     const timer = setTimeout(() => {
       if (isMounted && tentando) {
         console.log('NovaSenha: Timer atingido, encerrando tentativa');
+        if (!erro) setErro('Não foi possível validar seu link de acesso. Ele pode ter expirado ou já foi utilizado.');
         setTentando(false);
       }
-    }, 4000);
+    }, 6000);
 
     return () => {
       isMounted = false;
