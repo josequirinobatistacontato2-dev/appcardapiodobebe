@@ -8,6 +8,7 @@ export default function NovaSenha() {
   const [novaSenha, setNovaSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
   const [carregando, setCarregando] = useState(false);
+  const [sucesso, setSucesso] = useState(false);
   const [erro, setErro] = useState('');
   const [sessaoValida, setSessaoValida] = useState(false);
   const [tentando, setTentando] = useState(true);
@@ -78,8 +79,10 @@ export default function NovaSenha() {
       }
 
       // Sucesso!
-      alert('Senha atualizada com sucesso!');
-      window.location.href = '/login';
+      setSucesso(true);
+      setTimeout(() => {
+        window.location.href = '/login';
+      }, 3000);
 
     } catch (err: any) {
       console.error('NovaSenha: Erro ao atualizar senha:', err);
@@ -87,6 +90,24 @@ export default function NovaSenha() {
       setCarregando(false);
     }
   };
+
+  // Sucesso!
+  if (sucesso) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-stone-100 p-6">
+        <div className="w-full max-w-md bg-white rounded-[40px] shadow-2xl p-10 text-center space-y-6 border border-stone-200">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+            <CheckCircle2 className="text-green-600" size={32} />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-black text-stone-800 uppercase italic tracking-tighter">Senha Atualizada!</h2>
+            <p className="text-stone-500 text-sm font-bold">Sua senha foi alterada com sucesso.</p>
+            <p className="text-stone-400 text-[10px] font-bold uppercase tracking-widest pt-4">Redirecionando para o login...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Aguardando detecção do evento PASSWORD_RECOVERY
   if (tentando) {

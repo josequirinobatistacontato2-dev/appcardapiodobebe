@@ -139,21 +139,31 @@ export const verificarPermissao = async (email: string, adminEmail?: string) => 
 };
 
 /**
- * Solicita o reset de senha por e-mail (Sistema Próprio)
+ * Solicita o reset de senha por e-mail (Sistema Supabase via Serverless)
  */
 export const solicitarResetSenha = async (email: string) => {
   const emailLimpo = email.trim().toLowerCase();
-  console.log('authService: Iniciando solicitarResetSenha (Custom) para:', emailLimpo);
+  console.log('authService: Iniciando solicitarResetSenha (Serverless) para:', emailLimpo);
   
   try {
-    const response = await fetch('/api/auth/request-reset', {
+    const response = await fetch('/api/reset-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: emailLimpo })
     });
 
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Erro ao solicitar recuperação.');
+    const contentType = response.headers.get('content-type');
+    let data;
+    
+    if (contentType && contentType.includes('application/json')) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      console.error('Resposta não é JSON:', text);
+      throw new Error(`Erro no servidor: ${response.status}. Resposta não é JSON.`);
+    }
+
+    if (!response.ok) throw new Error(data?.error || 'Erro ao solicitar recuperação.');
     
     console.log('authService: Solicitação de reset enviada com sucesso para:', emailLimpo);
     return data;
@@ -170,14 +180,23 @@ export const resetarSenhaComToken = async (token: string, novaSenha: string) => 
   console.log('authService: Iniciando resetarSenhaComToken...');
   
   try {
-    const response = await fetch('/api/auth/reset-password', {
+    const response = await fetch('/api/reset-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, novaSenha })
     });
 
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Erro ao resetar senha.');
+    const contentType = response.headers.get('content-type');
+    let data;
+
+    if (contentType && contentType.includes('application/json')) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      throw new Error(`Erro no servidor: ${response.status}. Resposta não é JSON.`);
+    }
+
+    if (!response.ok) throw new Error(data?.error || 'Erro ao resetar senha.');
     
     console.log('authService: Senha resetada com sucesso.');
     return data;
