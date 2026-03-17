@@ -33,8 +33,15 @@ export default async function handler(req: any, res: any) {
   try {
     console.log(`[API] Solicitando reset de senha para: ${email}`);
     
+    // Determinar a URL de redirecionamento dinamicamente
+    const rawAppUrl = process.env.APP_URL || process.env.URL_DO_APLICATIVO || 'https://appcardapiodobebe.com';
+    const appUrl = rawAppUrl.replace(/\/$/, '');
+    const redirectTo = `${appUrl}/nova-senha`;
+
+    console.log(`[API] RedirectTo configurado como: ${redirectTo}`);
+
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: 'https://appcardapiodobebe.com/nova-senha',
+      redirectTo: redirectTo,
     });
 
     if (error) {

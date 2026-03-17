@@ -143,32 +143,35 @@ export const verificarPermissao = async (email: string, adminEmail?: string) => 
  */
 export const solicitarResetSenha = async (email: string) => {
   const emailLimpo = email.trim().toLowerCase();
-  console.log('authService: Iniciando solicitarResetSenha (Serverless) para:', emailLimpo);
+  console.log('authService: Iniciando solicitarResetSenha para:', emailLimpo);
   
   try {
+    // Tentamos primeiro o endpoint unificado que lida com o fluxo Supabase
     const response = await fetch('/api/reset-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: emailLimpo })
     });
 
-    const contentType = response.headers.get('content-type');
-    let data;
-    
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      const text = await response.text();
-      console.error('Resposta não é JSON:', text);
-      throw new Error(`Erro no servidor: ${response.status}. Resposta não é JSON.`);
+    if (!response.ok) {
+      // Fallback para o endpoint do servidor Express se o primeiro falhar
+      console.log('authService: Fallback para /api/auth/request-reset');
+      const fallbackResponse = await fetch('/api/auth/request-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailLimpo })
+      });
+      
+      if (!fallbackResponse.ok) {
+        const errorData = await fallbackResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Erro ao solicitar recuperação de senha.');
+      }
+      return await fallbackResponse.json();
     }
 
-    if (!response.ok) throw new Error(data?.error || 'Erro ao solicitar recuperação.');
-    
-    console.log('authService: Solicitação de reset enviada com sucesso para:', emailLimpo);
-    return data;
+    return await response.json();
   } catch (err: any) {
-    console.error('authService: Erro capturado em solicitarResetSenha:', err);
+    console.error('authService: Erro em solicitarResetSenha:', err);
     throw err;
   }
 };
@@ -180,26 +183,30 @@ export const resetarSenhaComToken = async (token: string, novaSenha: string) => 
   console.log('authService: Iniciando resetarSenhaComToken...');
   
   try {
+    // Tenta primeiro o endpoint unificado
     const response = await fetch('/api/reset-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, novaSenha })
     });
 
-    const contentType = response.headers.get('content-type');
-    let data;
+    if (!response.ok) {
+      // Fallback para o endpoint do servidor Express
+      console.log('authService: Fallback para /api/auth/reset-password');
+      const fallbackResponse = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, novaSenha })
+      });
 
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      const text = await response.text();
-      throw new Error(`Erro no servidor: ${response.status}. Resposta não é JSON.`);
+      if (!fallbackResponse.ok) {
+        const errorData = await fallbackResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Erro ao resetar senha.');
+      }
+      return await fallbackResponse.json();
     }
 
-    if (!response.ok) throw new Error(data?.error || 'Erro ao resetar senha.');
-    
-    console.log('authService: Senha resetada com sucesso.');
-    return data;
+    return await response.json();
   } catch (err: any) {
     console.error('authService: Erro em resetarSenhaComToken:', err);
     throw err;

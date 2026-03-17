@@ -16,11 +16,36 @@ export default function NovaSenha() {
   useEffect(() => {
     let isMounted = true;
 
+    const checkSession = async () => {
+      try {
+        let { data: { session } } = await supabase.auth.getSession();
+        console.log('NovaSenha: Check session inicial:', !!session);
+        
+        // Se não houver sessão mas houver hash, o Supabase pode estar processando
+        if (!session && window.location.hash.includes('access_token=')) {
+          console.log('NovaSenha: Hash detectado mas sem sessão, aguardando processamento...');
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          const { data: { session: retrySession } } = await supabase.auth.getSession();
+          session = retrySession;
+          console.log('NovaSenha: Check session após espera:', !!session);
+        }
+
+        if (session && isMounted) {
+          setSessaoValida(true);
+          setTentando(false);
+        }
+      } catch (e) {
+        console.error('NovaSenha: Error checking session:', e);
+      }
+    };
+
+    checkSession();
+
     // Escutar eventos de autenticação do Supabase
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('NovaSenha: Auth event:', event);
+      console.log('NovaSenha: Auth event:', event, 'Session:', !!session);
       
-      if (event === 'PASSWORD_RECOVERY') {
+      if (event === 'PASSWORD_RECOVERY' || (session && isMounted)) {
         if (isMounted) {
           setSessaoValida(true);
           setTentando(false);
@@ -28,28 +53,20 @@ export default function NovaSenha() {
       }
     });
 
-    // Timer de segurança caso o evento não dispare (link inválido ou expirado)
+    // Timer de segurança caso o evento não dispare
     const timer = setTimeout(() => {
-      if (isMounted) {
-        setTentando(prev => {
-          if (prev) {
-            setErro('Link de recuperação inválido ou expirado. Solicite um novo e-mail.');
-            setTimeout(() => {
-              if (isMounted) navigate('/esqueci-senha');
-            }, 3000);
-            return false;
-          }
-          return prev;
-        });
+      if (isMounted && tentando) {
+        console.log('NovaSenha: Timer atingido, encerrando tentativa');
+        setTentando(false);
       }
-    }, 5000);
+    }, 4000);
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
       clearTimeout(timer);
     };
-  }, [navigate]);
+  }, []);
 
   const handleAlterarSenha = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,29 +90,54 @@ export default function NovaSenha() {
     setCarregando(true);
 
     try {
-      // 1. Executar supabase.auth.updateUser() apenas quando o usuário clicar no botão
-      const { error } = await supabase.auth.updateUser({
+      console.log('NovaSenha: Iniciando atualização de senha...');
+      
+      // Verificar sessão antes de tentar
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (!currentSession) {
+        console.error('NovaSenha: Sem sessão ativa para atualização');
+        throw new Error('Sessão de recuperação não encontrada. O link pode ter expirado ou já foi utilizado.');
+      }
+
+      console.log('NovaSenha: Sessão confirmada, chamando updateUser...');
+
+      // Timeout de segurança para a chamada do Supabase
+      const updatePromise = supabase.auth.updateUser({
         password: novaSenha
       });
 
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Tempo limite excedido ao salvar senha. Verifique sua conexão ou tente novamente.')), 20000)
+      );
+
+      const { error } = await Promise.race([updatePromise, timeoutPromise]) as any;
+
       if (error) {
+        console.error('NovaSenha: Erro retornado pelo Supabase:', error);
         throw error;
       }
 
+      console.log('NovaSenha: Senha atualizada com sucesso!');
+      
       // Sucesso!
       setSucesso(true);
       
-      // Limpar a sessão de recuperação para evitar loops no App.tsx
-      await supabase.auth.signOut();
+      // Limpar o hash da URL usando o navigate do React Router para garantir que o estado global (App.tsx) seja atualizado
+      // Isso fará com que isRecovery se torne falso no App.tsx
+      navigate(window.location.pathname, { replace: true });
+
+      // NÃO damos signOut aqui para evitar conflitos de eventos com App.tsx
+      // O redirecionamento para o login cuidará disso ou o usuário já estará logado
       
       // 4. Após sucesso, redirecionar o usuário para /login
       setTimeout(() => {
+        console.log('NovaSenha: Redirecionando para login...');
         navigate('/login');
       }, 3000);
 
     } catch (err: any) {
       console.error('NovaSenha: Erro ao atualizar senha:', err);
-      setErro(err.message || 'Erro ao atualizar senha');
+      setErro(err.message || 'Erro ao atualizar senha. Verifique se o link ainda é válido.');
     } finally {
       // 5. Encerrar o estado de loading após sucesso ou erro
       setCarregando(false);

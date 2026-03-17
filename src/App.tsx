@@ -1905,20 +1905,25 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
           console.log('App: Auth event:', event, 'Session:', session?.user?.email);
 
-          if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-            console.log('App: Usuário logado ou atualizado:', session?.user?.email);
+          if (event === 'SIGNED_OUT') {
+            setUser(null);
+            localStorage.removeItem('bs_auth_user');
+            return;
           }
 
           if (session?.user) {
+            // Evitar sincronização durante o fluxo de redefinição de senha para não causar loops ou erros 400
+            if (event === 'USER_UPDATED' && window.location.pathname.includes('/nova-senha')) {
+              console.log('App: USER_UPDATED ignorado em /nova-senha para evitar conflitos');
+              return;
+            }
+
             try {
               // Apenas sincroniza o usuário. O controle de acesso será feito no Dashboard.
               await syncUser(session.user.email!);
             } catch (err: any) {
               console.error('Erro ao sincronizar usuário:', err.message);
             }
-          } else if (event === 'SIGNED_OUT') {
-            setUser(null);
-            localStorage.removeItem('bs_auth_user');
           }
         });
 
@@ -1936,7 +1941,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     return () => {
       if (subscription) subscription.unsubscribe();
     };
-  }, [theme.adminEmail, location.pathname, location.hash, location.search]);
+  }, [theme.adminEmail]); // Removido location para evitar re-init desnecessário
 
   const syncUser = async (email: string) => {
     // Check if it's admin
@@ -2717,7 +2722,6 @@ function MainRoutes() {
   const isRecovery = location.hash.includes('type=recovery') || 
                     location.hash.includes('access_token=') ||
                     location.hash.includes('recovery_token=') ||
-                    location.pathname.includes('/nova-senha') ||
                     location.search.includes('code=') ||
                     location.hash.includes('code=');
 
