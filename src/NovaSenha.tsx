@@ -53,6 +53,10 @@ export default function NovaSenha() {
 
   const handleAlterarSenha = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // 3. Adicionar controle de loading para impedir múltiplos envios
+    if (carregando) return;
+
     setErro('');
 
     // Validações básicas
@@ -69,7 +73,7 @@ export default function NovaSenha() {
     setCarregando(true);
 
     try {
-      // Executar apenas o updateUser conforme solicitado
+      // 1. Executar supabase.auth.updateUser() apenas quando o usuário clicar no botão
       const { error } = await supabase.auth.updateUser({
         password: novaSenha
       });
@@ -80,13 +84,20 @@ export default function NovaSenha() {
 
       // Sucesso!
       setSucesso(true);
+      
+      // Limpar a sessão de recuperação para evitar loops no App.tsx
+      await supabase.auth.signOut();
+      
+      // 4. Após sucesso, redirecionar o usuário para /login
       setTimeout(() => {
-        window.location.href = '/login';
+        navigate('/login');
       }, 3000);
 
     } catch (err: any) {
       console.error('NovaSenha: Erro ao atualizar senha:', err);
       setErro(err.message || 'Erro ao atualizar senha');
+    } finally {
+      // 5. Encerrar o estado de loading após sucesso ou erro
       setCarregando(false);
     }
   };
