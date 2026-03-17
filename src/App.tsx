@@ -84,17 +84,18 @@ try {
 
 const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: boolean = false, masterPurchaseDate?: string) => {
   const now = new Date();
+  const pData = product.data;
   
-  // Se o usuário tiver o produto principal, usamos a data de compra dele como base para todos os produtos
+  // Se o usuário tiver qualquer venda ativa, usamos a data de compra dela como base para todos os produtos
   const effectivePurchaseDate = purchaseDate || masterPurchaseDate;
   
   // Debug log para ajudar a identificar problemas de liberação
   if (effectivePurchaseDate) {
-    console.log(`Checking status for ${product.name}: Purchase=${effectivePurchaseDate}, Type=${product.releaseType}, Days=${product.releaseDays}, Admin=${isAdmin}`);
+    console.log(`Checking status for ${pData.name}: Purchase=${effectivePurchaseDate}, Type=${pData.releaseType}, Days=${pData.releaseDays}, Admin=${isAdmin}`);
   }
   
   // Se o produto estiver forçado como bloqueado pelo admin
-  if (product.forceLocked) {
+  if (pData.forceLocked) {
     return { 
       isReleased: isAdmin, // Admin ainda pode ver para testar
       isLocked: true, 
@@ -112,12 +113,12 @@ const getReleaseStatus = (product: Product, purchaseDate?: string, isAdmin: bool
   // Se for admin e não tiver data de compra, assume que a compra foi "agora"
   const pDate = effectivePurchaseDate ? new Date(effectivePurchaseDate) : new Date();
 
-  if (product.releaseType === ReleaseType.IMMEDIATE) {
+  if (pData.releaseType === ReleaseType.IMMEDIATE) {
     return { isReleased: true, isLocked: false, message: 'LIBERADO', sub: 'Pronto para leitura', icon: <Check size={18} /> };
   }
 
-  if (product.releaseType === ReleaseType.SCHEDULED) {
-    const days = typeof product.releaseDays === 'number' ? product.releaseDays : 7;
+  if (pData.releaseType === ReleaseType.SCHEDULED) {
+    const days = typeof pData.releaseDays === 'number' ? pData.releaseDays : 7;
     const isActuallyReleased = isProductUnlocked(pDate, days);
     
     if (isActuallyReleased || isAdmin) {
@@ -282,9 +283,9 @@ function DashboardView() {
   }
   
   const filteredProducts = useMemo(() => {
-    let list = products.filter(p => p.active);
+    let list = products.filter(p => p.data.active);
     if (selectedCategory) {
-      list = list.filter(p => p.category === selectedCategory);
+      list = list.filter(p => p.data.category === selectedCategory);
     }
     return list;
   }, [products, selectedCategory]);
@@ -420,27 +421,27 @@ function DashboardView() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 md:gap-6 lg:gap-8">
         {filteredProducts.map(p => {
-          const purchase = user?.purchasedProducts?.find(x => x.productId === p.id) || 
-                          (p.isBonus ? user?.purchasedProducts?.find(x => x.productId === p.parentId) : null);
+          const purchase = user?.purchasedProducts?.find(x => x.productId === p.data.id) || 
+                          (p.data.isBonus ? user?.purchasedProducts?.find(x => x.productId === p.data.parentId) : null);
           const status = getReleaseStatus(p, purchase?.purchaseDate, user?.role === 'admin', user?.masterPurchaseDate);
           return (
             <Link 
               key={p.id} 
               to={status.isReleased ? `/viewer/${p.id}` : '#'} 
               onClick={(e) => {
-                if (!status.isReleased && p.checkoutUrl) {
+                if (!status.isReleased && p.data.checkoutUrl) {
                   e.preventDefault();
-                  window.open(p.checkoutUrl, '_blank');
+                  window.open(p.data.checkoutUrl, '_blank');
                 }
               }}
               className="block group rounded-[24px] md:rounded-[40px] p-2 md:p-3 shadow-sm md:shadow-md transition-all duration-700 hover:-translate-y-2 hover:shadow-2xl overflow-hidden bg-white border border-stone-100 relative"
             >
               <div className="relative aspect-[3/4] rounded-[18px] md:rounded-[30px] overflow-hidden mb-2 md:mb-4 shadow-inner bg-stone-50">
-                {p.coverImage ? (
+                {p.data.coverImage ? (
                   <img 
-                    src={p.coverImage} 
+                    src={p.data.coverImage} 
                     className={`w-full h-full object-cover transition-all duration-1000 ${status.isLocked ? 'scale-105 blur-[1px] opacity-80' : 'group-hover:scale-110'}`} 
-                    alt={p.name} 
+                    alt={p.data.name} 
                     loading="lazy"
                     referrerPolicy="no-referrer"
                     onError={(e) => {
@@ -455,7 +456,7 @@ function DashboardView() {
                 
                 {/* Badges */}
                 <div className="absolute top-3 left-3 flex flex-col gap-2 z-20">
-                  {status.isLocked && p.checkoutUrl && (
+                  {status.isLocked && p.data.checkoutUrl && (
                     <div className="bg-orange-500 text-white text-[7px] md:text-[8px] font-black px-3 py-1 rounded-full shadow-lg uppercase tracking-widest flex items-center gap-1">
                       <Sparkles size={10} /> EXCLUSIVO
                     </div>
@@ -479,7 +480,7 @@ function DashboardView() {
                       )}
                     </div>
 
-                    {p.checkoutUrl && !status.daysRemaining && (
+                    {p.data.checkoutUrl && !status.daysRemaining && (
                       <div className="mt-6 px-6 py-2.5 bg-white text-black rounded-full text-[9px] font-black uppercase tracking-widest shadow-xl hover:bg-stone-100 transition-all">
                         ADQUIRIR AGORA
                       </div>
@@ -498,10 +499,10 @@ function DashboardView() {
               <div className="px-2 md:px-4 pb-2 md:pb-4 text-center">
                  <div className="flex items-center justify-center gap-2 mb-1">
                    <div className="h-[1px] w-4 bg-stone-100"></div>
-                   <span className="text-[7px] md:text-[8px] font-black uppercase tracking-[0.2em] block" style={{ color: theme.primaryColor }}>{p.category}</span>
+                   <span className="text-[7px] md:text-[8px] font-black uppercase tracking-[0.2em] block" style={{ color: theme.primaryColor }}>{p.data.category}</span>
                    <div className="h-[1px] w-4 bg-stone-100"></div>
                  </div>
-                 <h3 className="text-[11px] md:text-[13px] font-black uppercase italic tracking-tighter leading-tight line-clamp-2 transition-colors group-hover:text-orange-600 drop-shadow-sm">{p.name}</h3>
+                 <h3 className="text-[11px] md:text-[13px] font-black uppercase italic tracking-tighter leading-tight line-clamp-2 transition-colors group-hover:text-orange-600 drop-shadow-sm">{p.data.name}</h3>
               </div>
             </Link>
           );
@@ -535,7 +536,7 @@ const AdminView = () => {
   };
   
   const [showProductForm, setShowProductForm] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Partial<Product['data']> | null>(null);
   const [showClientForm, setShowClientForm] = useState(false);
   const [editingClient, setEditingClient] = useState<Partial<User> | null>(null);
   const [showNoticeForm, setShowNoticeForm] = useState(false);
@@ -613,11 +614,11 @@ const AdminView = () => {
               {products.map(p => (
                 <div key={p.id} className="bg-white rounded-[40px] p-6 border border-stone-100 shadow-sm group relative">
                    <div className="aspect-[3/4] rounded-[30px] overflow-hidden mb-4 bg-stone-50">
-                       {p.coverImage ? (
+                       {p.data.coverImage ? (
                          <img 
-                           src={p.coverImage} 
+                           src={p.data.coverImage} 
                            className="w-full h-full object-cover" 
-                           alt={p.name} 
+                           alt={p.data.name} 
                            loading="lazy"
                            referrerPolicy="no-referrer"
                            onError={(e) => {
@@ -631,25 +632,25 @@ const AdminView = () => {
                        )}
                    </div>
                    <div className="text-center space-y-1">
-                      <h4 className="font-black uppercase italic text-[10px] text-stone-800">{p.name}</h4>
+                      <h4 className="font-black uppercase italic text-[10px] text-stone-800">{p.data.name}</h4>
                       <div className="flex flex-col items-center gap-1">
                         <div className="flex items-center justify-center gap-2">
-                          {p.isBonus && <span className="text-[8px] font-black text-emerald-500 uppercase">EXTRA VINCULADO</span>}
-                          <span className={`text-[8px] font-black uppercase ${p.active ? 'text-emerald-500' : 'text-red-500'}`}>
-                            {p.active ? '• ATIVO' : '• INATIVO'}
+                          {p.data.isBonus && <span className="text-[8px] font-black text-emerald-500 uppercase">EXTRA VINCULADO</span>}
+                          <span className={`text-[8px] font-black uppercase ${p.data.active ? 'text-emerald-500' : 'text-red-500'}`}>
+                            {p.data.active ? '• ATIVO' : '• INATIVO'}
                           </span>
                         </div>
                         <div className="flex items-center justify-center gap-2">
                           <span className="text-[7px] font-bold text-stone-400 uppercase tracking-widest">
-                            {p.releaseType === ReleaseType.IMMEDIATE ? '⚡ IMEDIATO' : 
-                             p.releaseType === ReleaseType.SCHEDULED ? `⏰ ${p.releaseDays || 7} DIAS` : '🔒 CONDICIONAL'}
+                            {p.data.releaseType === ReleaseType.IMMEDIATE ? '⚡ IMEDIATO' : 
+                             p.data.releaseType === ReleaseType.SCHEDULED ? `⏰ ${p.data.releaseDays || 7} DIAS` : '🔒 CONDICIONAL'}
                           </span>
-                          {p.forceLocked && <span className="text-[7px] font-black text-orange-500 uppercase">🔒 FORÇADO</span>}
+                          {p.data.forceLocked && <span className="text-[7px] font-black text-orange-500 uppercase">🔒 FORÇADO</span>}
                         </div>
                       </div>
                    </div>
                    <div className="absolute inset-0 bg-black/40 md:bg-black/60 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-all flex items-end md:items-center justify-center pb-8 md:pb-0 gap-4 rounded-[40px]">
-                      <button onClick={() => { setEditingProduct(p); setShowProductForm(true); }} className="w-12 h-12 rounded-full bg-white text-orange-500 flex items-center justify-center shadow-2xl active:scale-90 transition-transform"><Edit size={20}/></button>
+                      <button onClick={() => { setEditingProduct(p.data); setShowProductForm(true); }} className="w-12 h-12 rounded-full bg-white text-orange-500 flex items-center justify-center shadow-2xl active:scale-90 transition-transform"><Edit size={20}/></button>
                       <button onClick={() => deleteProduct(p.id)} className="w-12 h-12 rounded-full bg-white text-red-500 flex items-center justify-center shadow-2xl active:scale-90 transition-transform"><Trash2 size={20}/></button>
                    </div>
                  </div>
@@ -1502,7 +1503,7 @@ const AdminView = () => {
 
               <div className="flex gap-4 pt-4">
                 <button onClick={()=>setShowProductForm(false)} className="flex-1 py-5 bg-stone-100 text-stone-400 rounded-[25px] font-black text-[10px] uppercase tracking-[0.2em] hover:bg-stone-200 transition-colors">CANCELAR</button>
-                <button onClick={async () => { await saveProduct(editingProduct as Product); setShowProductForm(false); }} className="flex-[2] py-5 bg-orange-500 text-white rounded-[25px] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-orange-600 transition-colors">SALVAR CONFIGURAÇÃO</button>
+                <button onClick={async () => { await saveProduct(editingProduct as Product['data']); setShowProductForm(false); }} className="flex-[2] py-5 bg-orange-500 text-white rounded-[25px] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-orange-600 transition-colors">SALVAR CONFIGURAÇÃO</button>
               </div>
           </div>
         </div>
@@ -1778,7 +1779,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       console.log('App: Dados essenciais carregados do Supabase');
       
       if (pRes.data) {
-        setProducts(pRes.data.map(x => (x.data || x.value || x) as Product).filter(p => p && p.id));
+        setProducts(pRes.data.filter(p => p && p.id));
       }
 
       if (tRes.data) {
@@ -1966,18 +1967,22 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
       const activeStatuses = ['ativo', 'approved', 'complete', 'active', 'aprovado', 'pago', 'finalizado', 'concluido'];
 
-      // Encontrar a data de compra de um produto permitido
-      const masterSale = salesData.find(sale => {
-        const s = String(sale.status || '').toLowerCase();
-        return isAllowedProduct(sale.product_id || sale.id_do_produto) && activeStatuses.includes(s);
-      });
-      const masterPurchaseDate = masterSale ? (masterSale.purchase_date || masterSale.created_at || masterSale.criado_em) : undefined;
-
-      // Determine overall user status (active if any sale is active)
-      const isAnyActive = salesData.some(sale => {
+      // Encontrar a data de compra de QUALQUER venda ativa para servir de base
+      const activeSales = salesData.filter(sale => {
         const s = String(sale.status || '').toLowerCase();
         return activeStatuses.includes(s);
+      }).sort((a, b) => {
+        const dateA = new Date(a.purchase_date || a.created_at || a.criado_em).getTime();
+        const dateB = new Date(b.purchase_date || b.created_at || b.criado_em).getTime();
+        return dateA - dateB; // Ordem crescente (mais antigo primeiro)
       });
+
+      const masterPurchaseDate = activeSales.length > 0 
+        ? (activeSales[0].purchase_date || activeSales[0].created_at || activeSales[0].criado_em) 
+        : undefined;
+
+      // Determine overall user status (active if any sale is active)
+      const isAnyActive = activeSales.length > 0;
 
       // Map flat sales data to User object
       const mappedUser: User = {
@@ -1985,7 +1990,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         name: primaryData.name || primaryData.nome || 'Usuário',
         email: (primaryData.email || primaryData["e-mail"]),
         role: 'user',
-        status: isAnyActive ? 'active' : 'suspended',
+        status: isAnyActive ? 'active' : 'no-access',
         accessType: '1year',
         startDate: primaryData.created_at || primaryData.criado_em,
         expiryDate: primaryData.expires_at || primaryData.expira_em,
@@ -2058,7 +2063,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const value = {
     user, setUser, products, clients, theme, loading, notices, banners, allCategories,
     userProfile, setUserProfile,
-    saveProduct: async (p: Product) => {
+    saveProduct: async (p: Product['data']) => {
       try {
         const id = p.id || `prod-${Date.now()}`;
         const { error } = await supabase.from('products').upsert({ id, data: { ...p, id } }, { onConflict: 'id' });
@@ -2212,7 +2217,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       setLoading(true);
       try {
         await Promise.all([
-          ...INITIAL_PRODUCTS.map(p => supabase.from('products').upsert({ id: p.id, data: p }, { onConflict: 'id' })),
+          ...INITIAL_PRODUCTS.map(p => supabase.from('products').upsert({ id: p.id, data: p.data }, { onConflict: 'id' })),
           ...INITIAL_NOTICES.map(n => supabase.from('notices').upsert({ id: n.id, data: n }, { onConflict: 'id' })),
           supabase.from('settings').upsert({ key: 'banners_carousel', value: INITIAL_BANNERS }, { onConflict: 'key' }),
           supabase.from('settings').upsert({ key: 'theme', value: DEFAULT_THEME }, { onConflict: 'key' })

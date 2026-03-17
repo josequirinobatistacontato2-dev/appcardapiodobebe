@@ -4,44 +4,56 @@ import { Category, Product, ReleaseType, ThemeSettings, PromotionBanner, Notice 
 export const INITIAL_PRODUCTS: Product[] = [
   {
     id: 'prod-1',
-    name: 'Cardápio do Bebê Saudável – 80 Receitas',
-    description: 'O passo a passo para as primeiras papinhas do seu bebê com segurança.',
-    coverImage: 'https://picsum.photos/seed/baby1/600/800',
-    category: Category.ALIMENTACAO,
-    pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-    releaseType: ReleaseType.IMMEDIATE,
-    active: true
+    data: {
+      id: 'prod-1',
+      name: 'Cardápio do Bebê Saudável – 80 Receitas',
+      description: 'O passo a passo para as primeiras papinhas do seu bebê com segurança.',
+      coverImage: 'https://picsum.photos/seed/baby1/600/800',
+      category: Category.ALIMENTACAO,
+      pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      releaseType: ReleaseType.IMMEDIATE,
+      active: true
+    }
   },
   {
     id: 'prod-2',
-    name: 'Guia de Introdução Alimentar',
-    description: 'Tudo o que você precisa saber para começar a introdução alimentar.',
-    coverImage: 'https://picsum.photos/seed/baby2/600/800',
-    category: Category.ALIMENTACAO,
-    pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-    releaseType: ReleaseType.IMMEDIATE,
-    active: true
+    data: {
+      id: 'prod-2',
+      name: 'Guia de Introdução Alimentar',
+      description: 'Tudo o que você precisa saber para começar a introdução alimentar.',
+      coverImage: 'https://picsum.photos/seed/baby2/600/800',
+      category: Category.ALIMENTACAO,
+      pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      releaseType: ReleaseType.IMMEDIATE,
+      active: true
+    }
   },
   {
     id: 'prod-3',
-    name: 'Papinhas Salgadas e Doces',
-    description: 'Receitas variadas para todas as fases do crescimento.',
-    coverImage: 'https://picsum.photos/seed/baby3/600/800',
-    category: Category.ALIMENTACAO,
-    pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-    releaseType: ReleaseType.IMMEDIATE,
-    active: true
+    data: {
+      id: 'prod-3',
+      name: 'Papinhas Salgadas e Doces',
+      description: 'Receitas variadas para todas as fases do crescimento.',
+      coverImage: 'https://picsum.photos/seed/baby3/600/800',
+      category: Category.ALIMENTACAO,
+      pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      releaseType: ReleaseType.IMMEDIATE,
+      active: true
+    }
   },
   {
     id: 'prod-4',
-    name: 'Manual do Sono do Bebê',
-    description: 'Dicas práticas para noites mais tranquilas.',
-    coverImage: 'https://picsum.photos/seed/baby4/600/800',
-    category: Category.SAUDE,
-    pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-    releaseType: ReleaseType.SCHEDULED,
-    releaseDays: 7,
-    active: true
+    data: {
+      id: 'prod-4',
+      name: 'Manual do Sono do Bebê',
+      description: 'Dicas práticas para noites mais tranquilas.',
+      coverImage: 'https://picsum.photos/seed/baby4/600/800',
+      category: Category.SAUDE,
+      pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      releaseType: ReleaseType.SCHEDULED,
+      releaseDays: 7,
+      active: true
+    }
   }
 ];
 

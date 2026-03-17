@@ -108,22 +108,24 @@ export interface ThemeSettings {
 }
 
 export interface Product {
-  id: string;
-  name: string;
-  description: string;
-  coverImage: string;
-  category: string;
-  displayCategory?: string; // Novo campo para agrupamento visual
-  pdfUrl: string;
-  releaseType: ReleaseType;
-  releaseDays?: number;
-  active: boolean;
-  forceLocked?: boolean;
-  
-  isBonus?: boolean;       
-  parentId?: string;      
-  hotmartId?: string;     
-  checkoutUrl?: string;   
+  id: string; // ID da linha no banco
+  data: {
+    id: string; // ID real do produto (Hotmart ID ou slug)
+    name: string;
+    description: string;
+    coverImage: string;
+    category: string;
+    displayCategory?: string;
+    pdfUrl: string;
+    releaseType: ReleaseType;
+    releaseDays?: number;
+    active: boolean;
+    forceLocked?: boolean;
+    isBonus?: boolean;
+    parentId?: string;
+    hotmartId?: string;
+    checkoutUrl?: string;
+  };
 }
 
 export type AccessDuration = '7days' | '30days' | '1year' | 'lifetime';
