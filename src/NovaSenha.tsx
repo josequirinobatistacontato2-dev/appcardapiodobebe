@@ -12,9 +12,11 @@ export default function NovaSenha() {
   const [erro, setErro] = useState('');
   const [sessaoValida, setSessaoValida] = useState(false);
   const [tentando, setTentando] = useState(true);
+  const finalizadoRef = React.useRef(false);
 
   useEffect(() => {
     let isMounted = true;
+    let timerId: any = null;
 
     const checkSession = async () => {
       try {
@@ -28,6 +30,8 @@ export default function NovaSenha() {
             ? 'O link de recuperação é inválido ou expirou. Por favor, solicite um novo.' 
             : errorMsg);
           setTentando(false);
+          finalizadoRef.current = true;
+          if (timerId) clearTimeout(timerId);
           return;
         }
 
@@ -54,8 +58,11 @@ export default function NovaSenha() {
         }
 
         if (session && isMounted) {
+          setErro('');
           setSessaoValida(true);
           setTentando(false);
+          finalizadoRef.current = true;
+          if (timerId) clearTimeout(timerId);
         }
       } catch (e: any) {
         console.error('NovaSenha: Error checking session:', e);
@@ -71,25 +78,29 @@ export default function NovaSenha() {
       
       if (event === 'PASSWORD_RECOVERY' || (session && isMounted)) {
         if (isMounted) {
+          setErro('');
           setSessaoValida(true);
           setTentando(false);
+          finalizadoRef.current = true;
+          if (timerId) clearTimeout(timerId);
         }
       }
     });
 
     // Timer de segurança caso o evento não dispare e não encontre sessão
-    const timer = setTimeout(() => {
-      if (isMounted && tentando) {
+    timerId = setTimeout(() => {
+      if (isMounted && !finalizadoRef.current) {
         console.log('NovaSenha: Timer atingido, encerrando tentativa');
         if (!erro) setErro('Não foi possível validar seu link de acesso. Ele pode ter expirado ou já foi utilizado.');
         setTentando(false);
+        finalizadoRef.current = true;
       }
-    }, 6000);
+    }, 10000);
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
-      clearTimeout(timer);
+      if (timerId) clearTimeout(timerId);
     };
   }, []);
 

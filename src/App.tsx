@@ -167,7 +167,12 @@ const calculateExpiryDate = (startDate: string | undefined, accessType: string |
 const isAccessExpired = (user: User | null): boolean => {
   if (!user || user.role === 'admin' || user.accessType === 'lifetime') return false;
   if (!user.expiryDate) return false;
-  return new Date() > new Date(user.expiryDate);
+  const expiry = new Date(user.expiryDate);
+  // Se a data de expiração for apenas a data (YYYY-MM-DD), definimos para o final do dia
+  if (user.expiryDate.includes('-') && !user.expiryDate.includes('T') && !user.expiryDate.includes(':')) {
+    expiry.setHours(23, 59, 59, 999);
+  }
+  return new Date() > expiry;
 };
 
 interface Toast { message: string; type: 'success' | 'error'; id: number; }
@@ -230,7 +235,7 @@ import EsqueciSenha from './EsqueciSenha';
 // ==========================================
 
 function NoAccessScreen({ isExpired }: { isExpired?: boolean }) {
-  const { theme, logout } = useApp();
+  const { theme, logout, user } = useApp();
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-stone-50" style={{ backgroundColor: theme.backgroundColor }}>
       <div className="max-w-md w-full bg-white rounded-[40px] p-10 shadow-2xl border border-stone-100 text-center space-y-8 animate-in zoom-in-95 duration-500">
@@ -244,7 +249,7 @@ function NoAccessScreen({ isExpired }: { isExpired?: boolean }) {
           <p className="text-sm font-medium text-stone-500 leading-relaxed">
             {isExpired 
               ? 'Sua assinatura do Cardápio do Bebê Saudável expirou. Renove seu acesso para continuar aproveitando nossos conteúdos exclusivos.'
-              : 'Olá! Identificamos que você ainda não possui uma assinatura ativa do Cardápio do Bebê Saudável vinculada a este e-mail.'}
+              : `Olá! Identificamos que você ainda não possui uma assinatura ativa do Cardápio do Bebê Saudável vinculada ao e-mail ${user?.email || ''}.`}
           </p>
           <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100 text-xs font-bold text-stone-400 uppercase tracking-widest">
             {isExpired ? 'Renove agora e não perca nada' : 'Verifique se usou o mesmo e-mail da Hotmart'}
@@ -1939,23 +1944,35 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       const salesPromise = supabase
         .from('sales')
         .select('*')
-        .or(`email.eq.${emailLimpo},e-mail.eq.${emailLimpo}`);
+        .or(`email.ilike.%${emailLimpo}%,e-mail.ilike.%${emailLimpo}%`);
         
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Timeout ao buscar dados de vendas')), 8000)
       );
 
-      const { data: salesData, error: salesError } = await Promise.race([salesPromise, timeoutPromise]) as any;
+      const { data: rawSales, error: salesError } = await Promise.race([salesPromise, timeoutPromise]) as any;
       
       if (salesError && salesError.code !== 'PGRST116') {
         console.error('App: Erro ao buscar salesData:', salesError);
       }
 
-      console.log('App: syncUser salesData recebido:', salesData?.length || 0, 'registros');
+      // Filtrar no JS para garantir match exato (ignorando espaços e case)
+      const salesData = rawSales?.filter((s: any) => {
+        const sEmail = (s.email || s["e-mail"] || "").trim().toLowerCase();
+        return sEmail === emailLimpo;
+      }) || [];
+
+      console.log('App: syncUser salesData recebido:', salesData.length, 'registros');
     
-    if (salesData && salesData.length > 0) {
-      // Use the first record for basic info (name, status, etc)
-      const primaryData = salesData[0];
+    if (salesData.length > 0) {
+      // Ordenar todas as vendas por data decrescente para pegar a mais recente como primária
+      const sortedSales = [...salesData].sort((a, b) => {
+        const dateA = new Date(a.purchase_date || a.created_at || a.criado_em || 0).getTime();
+        const dateB = new Date(b.purchase_date || b.created_at || b.criado_em || 0).getTime();
+        return dateB - dateA;
+      });
+
+      const primaryData = sortedSales[0];
       
       // Map all sales records to purchasedProducts array
       const purchasedProducts = salesData
@@ -1965,16 +1982,24 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           purchaseDate: sale.purchase_date || sale.created_at || sale.criado_em
         }));
 
-      const activeStatuses = ['ativo', 'approved', 'complete', 'active', 'aprovado', 'pago', 'finalizado', 'concluido'];
+      const activeStatuses = [
+        'ativo', 'ativa', 'active', 
+        'approved', 'aprovado', 'aprovada', 
+        'complete', 'completo', 'completa', 
+        'pago', 'paga', 
+        'finalizado', 'finalizada', 
+        'concluido', 'concluida', 
+        'disponivel', 'disponível'
+      ];
 
       // Encontrar a data de compra de QUALQUER venda ativa para servir de base
       const activeSales = salesData.filter(sale => {
-        const s = String(sale.status || '').toLowerCase();
+        const s = String(sale.status || '').toLowerCase().trim();
         return activeStatuses.includes(s);
       }).sort((a, b) => {
-        const dateA = new Date(a.purchase_date || a.created_at || a.criado_em).getTime();
-        const dateB = new Date(b.purchase_date || b.created_at || b.criado_em).getTime();
-        return dateA - dateB; // Ordem crescente (mais antigo primeiro)
+        const dateA = new Date(a.purchase_date || a.created_at || a.criado_em || 0).getTime();
+        const dateB = new Date(b.purchase_date || b.created_at || b.criado_em || 0).getTime();
+        return dateA - dateB; // Ordem crescente (mais antigo primeiro para o masterPurchaseDate)
       });
 
       const masterPurchaseDate = activeSales.length > 0 
