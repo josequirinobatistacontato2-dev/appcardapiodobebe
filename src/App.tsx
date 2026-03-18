@@ -75,6 +75,8 @@ try {
   console.error('Erro ao configurar PDF worker:', e);
 }
 
+const MAIN_HOTMART_ID = '7185103';
+
 const getReleaseStatus = (product: Product, isAdmin: boolean = false, masterPurchaseDate?: string) => {
   const now = new Date();
   const pData = product.data;
@@ -303,9 +305,9 @@ function DashboardView() {
   }
   
   const filteredProducts = useMemo(() => {
-    let list = products.filter(p => p.data.active);
+    let list = products.filter(p => p.data?.active);
     if (selectedCategory) {
-      list = list.filter(p => p.data.category === selectedCategory);
+      list = list.filter(p => p.data?.category === selectedCategory);
     }
     return list;
   }, [products, selectedCategory]);
@@ -539,6 +541,7 @@ const AdminView = () => {
   const [activeTab, setActiveTab] = useState<'CATALOG' | 'CLIENTS' | 'NOTICES' | 'BANNERS' | 'SUPPORT' | 'INTEGRATION' | 'BRANDING'>('CATALOG');
 
   useEffect(() => {
+    console.log('AdminView: Mounted');
     loadSales();
   }, []);
   
@@ -580,7 +583,7 @@ const AdminView = () => {
     { id: 'BRANDING', label: 'ESTILO' }
   ];
 
-  const principalProducts = products.filter(p => !p.isBonus);
+  const principalProducts = products.filter(p => p.data && !p.data.isBonus);
 
   const [isSavingClient, setIsSavingClient] = useState(false);
 
@@ -1496,7 +1499,7 @@ const AdminView = () => {
                     <select value={editingProduct.parentId || ''} onChange={e=>setEditingProduct({...editingProduct, parentId: e.target.value})} className="w-full p-4 bg-stone-50 rounded-[20px] font-bold text-sm appearance-none outline-none focus:ring-2 focus:ring-orange-500/20">
                       <option value="">Selecione o produto principal...</option>
                       {principalProducts.filter(p => p.id !== editingProduct.id).map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
+                        <option key={p.id} value={p.id}>{p.data.name}</option>
                       ))}
                     </select>
                   </div>
@@ -1590,7 +1593,7 @@ const AdminView = () => {
                               className="flex items-center gap-3 text-left"
                             >
                               {hasAccess ? <Unlock size={16} className="text-orange-500" /> : <Lock size={16} className="text-stone-300" />}
-                              <span className={`text-[10px] font-black uppercase italic tracking-tight ${hasAccess ? 'text-orange-600' : 'text-stone-400'}`}>{p.name}</span>
+                              <span className={`text-[10px] font-black uppercase italic tracking-tight ${hasAccess ? 'text-orange-600' : 'text-stone-400'}`}>{p.data.name}</span>
                             </button>
                           </div>
                           
@@ -1733,12 +1736,23 @@ const AdminView = () => {
 
 const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const userRef = useRef<User | null>(null);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [clients, setClients] = useState<User[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [banners, setBanners] = useState<PromotionBanner[]>([]);
   const [theme, setThemeState] = useState<ThemeSettings>(DEFAULT_THEME);
+  const themeRef = useRef<ThemeSettings>(DEFAULT_THEME);
+
+  // Sincronizar o ref com o estado
+  useEffect(() => {
+    themeRef.current = theme;
+  }, [theme]);
   const [loading, setLoading] = useState(true);
   const [loadingUser, setLoadingUser] = useState(true);
   const [loadingSales, setLoadingSales] = useState(true);
@@ -1766,7 +1780,9 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     
     for (const table of tables) {
       try {
-        const { error } = await supabase.from(table).select('*').limit(1);
+        const queryPromise = supabase.from(table).select('*').limit(1);
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 3000));
+        const { error } = await Promise.race([queryPromise, timeoutPromise]) as any;
         results[table] = !error;
         if (error) console.warn(`Table ${table} check failed:`, error.message);
       } catch (e) {
@@ -1799,9 +1815,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       console.log('App: Dados essenciais carregados do Supabase');
       
       if (pRes.data) {
-        setProducts(pRes.data.filter(p => p && p.id));
+        setProducts(pRes.data.filter((p: any) => p && p.id && p.data));
       }
 
+      let loadedTheme = DEFAULT_THEME;
       if (tRes.data) {
         const themeData = tRes.data.data || tRes.data.value;
         if (themeData) {
@@ -1809,13 +1826,15 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             const newState = {...DEFAULT_THEME, ...prev, ...themeData};
             // Garantir que o adminEmail nunca fique vazio se houver um padrão
             if (!newState.adminEmail) newState.adminEmail = DEFAULT_THEME.adminEmail;
+            loadedTheme = newState;
+            themeRef.current = newState; // Atualiza o ref imediatamente
             return newState;
           });
         }
       }
 
       if (nRes.data) {
-        setNotices(nRes.data.map(x => (x.data || x.value) as Notice));
+        setNotices(nRes.data.map((x: any) => (x.data || x.value) as Notice));
       }
 
       if (bRes.data) {
@@ -1824,24 +1843,32 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           setBanners(bannersData);
         }
       }
+      return loadedTheme;
     } catch (e) { 
       console.error('Error loading data:', e); 
+      return DEFAULT_THEME;
     }
   };
+
+  const initializedRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
     let authSubscription: any = null;
+    
+    if (initializedRef.current) return;
+    initializedRef.current = true;
 
     const initApp = async () => {
-      console.log('App: Iniciando initApp...');
+      const isPreview = window.location.hostname.includes('run.app') || window.self !== window.top;
+      console.log('App: Iniciando initApp (Mount único)...', { isPreview });
       setLoading(true);
       setLoadingUser(true);
       setLoadingSales(true);
 
       try {
         // 1. Carregar dados essenciais (produtos, tema, etc)
-        await loadData();
+        const currentTheme = await loadData();
 
         // 2. Verificar fluxo de recuperação de senha
         const isRecovery = location.hash.includes('type=recovery') || 
@@ -1885,9 +1912,12 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           }
 
           if (session?.user) {
-            // Evitar sincronização durante o fluxo de redefinição de senha
-            // Não queremos que o usuário seja "logado" globalmente na aplicação
-            // enquanto estiver apenas redefinindo a senha.
+            // Se já estivermos sincronizados com este e-mail e não for um evento de login explícito, ignoramos
+            if (userRef.current?.email === session.user.email && event !== 'SIGNED_IN') {
+              console.log('App: Usuário já sincronizado, ignorando evento:', event);
+              return;
+            }
+
             if (window.location.pathname.includes('/nova-senha')) {
               console.log('App: Sincronização ignorada pois estamos em /nova-senha');
               setLoading(false);
@@ -1897,13 +1927,11 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             }
 
             try {
+              // Só mostramos loading se for uma mudança real de estado que exige sync
               if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-                setLoading(true);
-                setLoadingUser(true);
-                setLoadingSales(true);
+                setLoadingUser(false);
               }
               
-              setLoadingUser(false);
               await syncUser(session.user.email!);
             } catch (err: any) {
               console.error('App: Erro ao sincronizar usuário:', err.message);
@@ -1926,7 +1954,6 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         authSubscription = subscription;
 
         // 3. Verificação inicial de sessão (caso o listener demore)
-        // Timeout de 5 segundos para getSession
         const getSessionPromise = supabase.auth.getSession();
         const sessionTimeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('TIMEOUT_GET_SESSION')), 5000)
@@ -1936,9 +1963,9 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           const result = await Promise.race([getSessionPromise, sessionTimeoutPromise]) as any;
           const session = result.data?.session;
           
-          if (isMounted && session?.user && !user) {
-            // Não sincronizar se estivermos redefinindo a senha
+          if (isMounted && session?.user && !userRef.current) {
             if (!window.location.pathname.includes('/nova-senha')) {
+              // Usamos o currentTheme carregado para evitar dependência de estado
               await syncUser(session.user.email!);
             }
           }
@@ -1949,6 +1976,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         console.error("Erro no initApp:", error);
       } finally {
         if (isMounted) {
+          console.log('App: initApp finalizado');
           setLoading(false);
           setLoadingUser(false);
           setLoadingSales(false);
@@ -1962,13 +1990,20 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       isMounted = false;
       if (authSubscription) authSubscription.unsubscribe();
     };
-  }, [theme.adminEmail]);
+  }, []); // Mount único
 
   const syncingEmailRef = useRef<string | null>(null);
 
   const syncUser = async (email: string, retryCount = 0) => {
     const emailLimpo = email.trim().toLowerCase();
+    const currentTheme = themeRef.current;
     
+    // Se já estivermos sincronizados com este e-mail e não for um retry, ignoramos
+    if (userRef.current?.email === emailLimpo && retryCount === 0) {
+      console.log("App: Usuário já sincronizado:", emailLimpo);
+      return;
+    }
+
     // Evitar chamadas duplicadas para o mesmo e-mail (exceto em caso de retry)
     if (syncingEmailRef.current === emailLimpo && retryCount === 0) {
       console.log("App: Sincronização já em andamento para:", emailLimpo);
@@ -1979,7 +2014,8 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     console.log(`LOGIN SUCCESS (Attempt ${retryCount + 1}):`, emailLimpo);
     
     // Check if it's admin
-    if (emailLimpo === theme.adminEmail.toLowerCase()) {
+    if (emailLimpo === currentTheme.adminEmail.toLowerCase()) {
+      console.log('admin session loaded', { email: emailLimpo, role: 'admin' });
       setUser({ id: 'admin', name: 'Master Admin', email, role: 'admin', status: 'active', accessType: 'lifetime', startDate: new Date().toISOString(), masterPurchaseDate: undefined, purchasedProducts: [] });
       setLoadingSales(false);
       syncingEmailRef.current = null;
@@ -1988,7 +2024,6 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
     try {
       setLoadingSales(true);
-      setLoading(true);
       
       // Timeout de 15 segundos para a consulta de vendas
       const salesPromise = supabase
@@ -2083,21 +2118,33 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         purchaseDate: sale.purchase_date || sale.created_at || sale.criado_em
       }));
 
-    // Encontrar a data de compra de QUALQUER venda ativa para servir de base
+    // Encontrar a venda do PRODUTO PRINCIPAL (7185103) para servir de base para liberação
+    const mainSales = salesData.filter(sale => {
+      const pid = String(sale.product_id || sale.id_do_produto || '');
+      const s = String(sale.status || '').toLowerCase().trim();
+      return pid === MAIN_HOTMART_ID && ACTIVE_STATUSES.includes(s);
+    }).sort((a, b) => {
+      const dateA = new Date(a.purchase_date || a.created_at || a.criado_em || 0).getTime();
+      const dateB = new Date(b.purchase_date || b.created_at || b.criado_em || 0).getTime();
+      return dateA - dateB; // Mais antigo primeiro para o masterPurchaseDate
+    });
+
+    // Se não encontrar o produto principal, mas houver outras vendas ativas, 
+    // pegamos a mais antiga de qualquer produto como fallback (para não bloquear usuários legados)
     const activeSales = salesData.filter(sale => {
       const s = String(sale.status || '').toLowerCase().trim();
       return ACTIVE_STATUSES.includes(s);
     }).sort((a, b) => {
       const dateA = new Date(a.purchase_date || a.created_at || a.criado_em || 0).getTime();
       const dateB = new Date(b.purchase_date || b.created_at || b.criado_em || 0).getTime();
-      return dateA - dateB; // Ordem crescente (mais antigo primeiro para o masterPurchaseDate)
+      return dateA - dateB;
     });
 
-    const masterPurchaseDate = activeSales.length > 0 
-      ? (activeSales[0].created_at || activeSales[0].criado_em || activeSales[0].purchase_date) 
-      : undefined;
+    const masterPurchaseDate = mainSales.length > 0 
+      ? (mainSales[0].created_at || mainSales[0].criado_em || mainSales[0].purchase_date)
+      : (activeSales.length > 0 ? (activeSales[0].created_at || activeSales[0].criado_em || activeSales[0].purchase_date) : undefined);
 
-    // Determine overall user status (active if any sale is active)
+    // Determine overall user status (active if main product is active or any active sale exists)
     const isAnyActive = activeSales.length > 0;
 
     // Map flat sales data to User object
@@ -2117,9 +2164,14 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   };
 
   const loadSales = async () => {
+    console.log('admin query start');
+    setLoadingSales(true);
     try {
       console.log('App: Carregando lista completa de clientes (admin)...');
-      const { data: sRes, error } = await supabase.from('sales').select('*');
+      const queryPromise = supabase.from('sales').select('*');
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 5000));
+      const { data: sRes, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
+      
       if (error) throw error;
 
       if (sRes) {
@@ -2155,6 +2207,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         });
         setClients(Array.from(clientsMap.values()));
       }
+      console.log('admin query finished', { clientCount: sRes?.length || 0 });
     } catch (err) {
       console.error('Erro ao carregar vendas:', err);
     }
@@ -2375,6 +2428,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     checkDatabase,
     loadingUser,
     loadingSales,
+    setLoading,
+    setLoadingUser,
+    setLoadingSales,
+    syncUser,
   };
 
   return (<AppContext.Provider value={value}>{children}<div className="fixed bottom-10 right-10 z-[300] flex flex-col gap-4">{toasts.map(t => (<div key={t.id} className={`px-10 py-5 rounded-full shadow-2xl flex items-center gap-4 animate-in slide-in-from-right-10 border bg-black text-white ${t.type === 'success' ? 'border-emerald-500' : 'border-red-500'}`}>{t.type === 'success' ? <Check size={18} /> : <AlertCircle size={18} />}<span className="text-[10px] font-black uppercase tracking-widest">{t.message}</span></div>))}</div></AppContext.Provider>);
@@ -2396,9 +2453,9 @@ const PDFViewerView = () => {
   const status = product ? getReleaseStatus(product, user?.role === 'admin', user?.masterPurchaseDate) : { isReleased: false };
 
   useEffect(() => {
-    if (!product?.pdfUrl) return;
+    if (!product?.data?.pdfUrl || !status.isReleased) return;
     setLoading(true);
-    const loadingTask = getDocument(product.pdfUrl);
+    const loadingTask = getDocument(product.data.pdfUrl);
     loadingTask.promise.then((pdfDoc) => {
       setPdf(pdfDoc);
       setNumPages(pdfDoc.numPages);
@@ -2407,7 +2464,7 @@ const PDFViewerView = () => {
       console.error('Error loading PDF:', err);
       setLoading(false);
     });
-  }, [product?.pdfUrl]);
+  }, [product?.data?.pdfUrl, status.isReleased]);
 
   const renderTaskRef = useRef<any>(null);
 
@@ -2463,6 +2520,7 @@ const PDFViewerView = () => {
   }, [pdf, pageNumber, zoom]);
 
   if (!product) return <Navigate to="/dashboard" />;
+  if (!status.isReleased) return <Navigate to="/dashboard" />;
 
   const changePage = (offset: number) => {
     setPageNumber(prevPageNumber => {
@@ -2479,7 +2537,7 @@ const PDFViewerView = () => {
         </button>
         
         <div className="flex flex-col items-center">
-          <h2 className="text-[10px] md:text-xs font-black uppercase italic tracking-tighter truncate max-w-[120px] md:max-w-none">{product.name}</h2>
+          <h2 className="text-[10px] md:text-xs font-black uppercase italic tracking-tighter truncate max-w-[120px] md:max-w-none">{product.data.name}</h2>
           {numPages > 0 && (
             <span className="text-[8px] font-black text-stone-400 uppercase tracking-widest mt-1">Página {pageNumber} de {numPages}</span>
           )}
@@ -2936,12 +2994,141 @@ function PWAWrapper({ children }: { children: React.ReactNode }) {
 
 function ProtectedRoute({ children }: { children?: React.ReactNode }) { 
   const { user, loading, loadingUser, loadingSales } = useApp(); 
+  const [showFallback, setShowFallback] = useState(false);
 
-  if (loading || loadingUser || loadingSales) return <div className="h-screen bg-stone-950 flex items-center justify-center"><Loader2 className="animate-spin text-white" /></div>; 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (loading || loadingUser || loadingSales) {
+        console.log('App: ProtectedRoute loading timeout reached');
+        setShowFallback(true);
+      }
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading, loadingUser, loadingSales]);
+
+  if (loading || loadingUser || loadingSales) {
+    return (
+      <div className="h-screen bg-stone-950 flex flex-col items-center justify-center gap-4">
+        <Loader2 className="animate-spin text-white" />
+        {showFallback && (
+          <div className="text-center space-y-4 animate-in fade-in duration-500">
+            <p className="text-stone-500 text-xs font-bold uppercase tracking-widest">O carregamento está demorando mais que o esperado</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="px-6 py-2 bg-white/10 text-white rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-white/20 transition-all"
+            >
+              Recarregar Página
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
   return user ? <>{children}</> : <Navigate to="/" />; 
 }
 function AdminRoute({ children }: { children?: React.ReactNode }) { 
-  const { user, loading, loadingUser, loadingSales } = useApp(); 
-  if (loading || loadingUser || loadingSales) return <div className="h-screen bg-stone-950 flex items-center justify-center"><Loader2 className="animate-spin text-white" /></div>; 
-  return user?.role === 'admin' ? <>{children}</> : <Navigate to="/" />; 
+  const { user, loading, loadingUser, loadingSales, setLoading, setLoadingUser, setLoadingSales, syncUser, theme } = useApp(); 
+  const [showFallback, setShowFallback] = useState(false);
+  const [isForced, setIsForced] = useState(false);
+  const isPreview = window.location.hostname.includes('run.app') || window.self !== window.top;
+
+  const loadingStates = [
+    loading && 'Dados Gerais',
+    loadingUser && 'Autenticação',
+    loadingSales && 'Vendas/Clientes'
+  ].filter(Boolean).join(', ');
+
+  const forceUnlock = async () => {
+    console.log('admin preview fallback: Force unlocking loading states');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        console.log('admin preview: Session found manually', session.user.email);
+        await syncUser(session);
+      }
+    } catch (e) {
+      console.error('admin preview: Error getting manual session', e);
+    }
+    setLoading(false);
+    setLoadingUser(false);
+    setLoadingSales(false);
+    setIsForced(true);
+  };
+
+  useEffect(() => {
+    if (loading || loadingUser || loadingSales) {
+      console.log('admin auth start', { loading, loadingUser, loadingSales });
+    } else {
+      console.log('admin session loaded', { userEmail: user?.email, role: user?.role });
+    }
+  }, [loading, loadingUser, loadingSales, user]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (loading || loadingUser || loadingSales) {
+        console.log('admin preview fallback triggered');
+        setShowFallback(true);
+      }
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loading, loadingUser, loadingSales]);
+
+  if (!isForced && (loading || loadingUser || loadingSales)) {
+    return (
+      <div className="h-screen bg-stone-950 flex flex-col items-center justify-center gap-6 p-6 text-center">
+        <Loader2 className="animate-spin text-white" size={32} />
+        
+        {showFallback && (
+          <div className="max-w-md space-y-6 animate-in fade-in zoom-in-95 duration-700">
+            <div className="space-y-2">
+              <h2 className="text-white text-xl font-black uppercase italic tracking-tighter">Ambiente de Teste</h2>
+              <p className="text-stone-400 text-xs font-medium leading-relaxed">
+                {isPreview 
+                  ? 'Detectamos que você está no preview do Google AI Studio. Algumas restrições de iframe podem atrasar a sincronização da sessão.'
+                  : 'O carregamento do painel administrativo está demorando.'}
+              </p>
+              <p className="text-[10px] text-emerald-500 uppercase tracking-widest font-black mt-2">
+                Aguardando: {loadingStates || 'Finalizando...'}
+              </p>
+            </div>
+            
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => window.location.reload()}
+                className="w-full py-4 bg-white text-black rounded-full font-black text-[10px] uppercase tracking-widest hover:bg-stone-200 transition-all"
+              >
+                Tentar Novamente
+              </button>
+              {isPreview && (
+                <button 
+                  onClick={forceUnlock}
+                  className="w-full py-4 bg-orange-500 text-white rounded-full font-black text-[10px] uppercase tracking-widest hover:bg-orange-600 transition-all shadow-lg"
+                >
+                  Forçar Acesso (Preview)
+                </button>
+              )}
+              <button 
+                onClick={() => window.location.href = '/'}
+                className="w-full py-4 bg-white/10 text-white rounded-full font-black text-[10px] uppercase tracking-widest hover:bg-white/20 transition-all"
+              >
+                Voltar para Início
+              </button>
+            </div>
+
+            {isPreview && (
+              <p className="text-[9px] text-stone-600 font-bold uppercase tracking-widest">
+                Dica: Se o problema persistir, tente abrir o app em uma nova aba.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+  
+  if (isForced || user?.role === 'admin') {
+    return <>{children}</>;
+  }
+
+  return <Navigate to="/" />; 
 }

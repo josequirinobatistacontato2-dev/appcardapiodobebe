@@ -39,7 +39,10 @@ export const Login = () => {
     const eTrim = email.trim().toLowerCase();
 
     // ADMIN BYPASS
-    if (eTrim === theme.adminEmail.toLowerCase() && password === 'admin123') {
+    const hardcodedAdmin = 'sertanejopremiercontato@gmail.com';
+    const isAdminEmail = eTrim === theme.adminEmail.toLowerCase() || eTrim === hardcodedAdmin;
+    
+    if (isAdminEmail && password === 'admin123') {
       const adminUser: User = { 
         id: 'admin', 
         name: 'Master Admin', 
@@ -81,7 +84,15 @@ export const Login = () => {
       }
     } catch (err: any) {
       console.error('Login error:', err);
-      notify(err.message || 'Erro ao realizar login.', 'error');
+      let msg = err.message || 'Erro ao realizar login.';
+      
+      if (msg.includes('Invalid login credentials')) {
+        msg = 'E-mail ou senha incorretos. Se este é seu primeiro acesso, clique no botão "PRIMEIRO ACESSO" abaixo para criar sua senha.';
+      } else if (msg.includes('Email not confirmed')) {
+        msg = 'Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada.';
+      }
+      
+      notify(msg, 'error');
     } finally {
       console.log('Login: Finalizando loading');
       setLoading(false);

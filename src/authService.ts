@@ -83,7 +83,7 @@ export const solicitarResetSenha = async (email: string) => {
   try {
     // Usar o sistema nativo do Supabase para garantir o uso dos templates configurados no Dashboard
     const { data, error } = await supabase.auth.resetPasswordForEmail(emailLimpo, {
-      redirectTo: "https://appcardapiodobebe.com/nova-senha"
+      redirectTo: `${window.location.origin}/nova-senha`
     });
 
     if (error) throw error;
