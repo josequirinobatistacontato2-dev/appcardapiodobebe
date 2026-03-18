@@ -158,18 +158,16 @@ export default function NovaSenha() {
       // Sucesso!
       setSucesso(true);
       
-      // Limpar o hash da URL usando o navigate do React Router para garantir que o estado global (App.tsx) seja atualizado
-      // Isso fará com que isRecovery se torne falso no App.tsx
-      navigate(window.location.pathname, { replace: true });
+      // 1. Executar logout imediato após redefinição de senha (conforme solicitado)
+      console.log('NovaSenha: Executando signOut imediato...');
+      await supabase.auth.signOut();
 
-      // NÃO damos signOut aqui para evitar conflitos de eventos com App.tsx
-      // O redirecionamento para o login cuidará disso ou o usuário já estará logado
-      
-      // 4. Após sucesso, redirecionar o usuário para /login
+      // 2. Redirecionar obrigatoriamente para a página de login usando window.location.href
+      // para garantir a limpeza total do estado da aplicação
       setTimeout(() => {
         console.log('NovaSenha: Redirecionando para login...');
-        navigate('/login');
-      }, 3000);
+        window.location.href = "/login";
+      }, 1000);
 
     } catch (err: any) {
       console.error('NovaSenha: Erro ao atualizar senha:', err);

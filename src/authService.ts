@@ -74,31 +74,20 @@ export const verificarPermissao = async (email: string, adminEmail?: string) => 
 };
 
 /**
- * Solicita o reset de senha por e-mail (Sistema Supabase via Serverless)
+ * Solicita o reset de senha por e-mail (Sistema Nativo Supabase)
  */
 export const solicitarResetSenha = async (email: string) => {
   const emailLimpo = email.trim().toLowerCase();
-  console.log('authService: Iniciando solicitarResetSenha para:', emailLimpo);
+  console.log('authService: Iniciando solicitarResetSenha nativo para:', emailLimpo);
   
   try {
-    const baseUrl = window.location.origin;
-    // Tentamos o endpoint unificado
-    const response = await fetch(`${baseUrl}/api/reset-password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: emailLimpo }),
-      signal: AbortSignal.timeout(15000) 
-    }).catch(err => {
-      console.error('authService: Erro de rede em /api/reset-password:', err);
-      throw new Error('Erro de conexão com o servidor. Verifique sua internet.');
+    // Usar o sistema nativo do Supabase para garantir o uso dos templates configurados no Dashboard
+    const { data, error } = await supabase.auth.resetPasswordForEmail(emailLimpo, {
+      redirectTo: "https://appcardapiodobebe.com/nova-senha"
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `Erro ${response.status}: Falha ao solicitar recuperação.`);
-    }
-
-    return await response.json();
+    if (error) throw error;
+    return data;
   } catch (err: any) {
     console.error('authService: Erro em solicitarResetSenha:', err);
     throw err;
@@ -106,37 +95,7 @@ export const solicitarResetSenha = async (email: string) => {
 };
 
 /**
- * Atualiza a senha do usuário usando o token customizado
- */
-export const resetarSenhaComToken = async (token: string, novaSenha: string) => {
-  console.log('authService: Iniciando resetarSenhaComToken...');
-  
-  try {
-    const baseUrl = window.location.origin;
-    const response = await fetch(`${baseUrl}/api/reset-password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, novaSenha }),
-      signal: AbortSignal.timeout(15000)
-    }).catch(err => {
-      console.error('authService: Erro de rede em /api/reset-password:', err);
-      throw new Error('Erro de conexão com o servidor. Verifique sua internet.');
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `Erro ${response.status}: Falha ao resetar senha.`);
-    }
-
-    return await response.json();
-  } catch (err: any) {
-    console.error('authService: Erro em resetarSenhaComToken:', err);
-    throw err;
-  }
-};
-
-/**
- * Atualiza a senha do usuário logado (mantido para compatibilidade se necessário)
+ * Atualiza a senha do usuário logado (usado no fluxo de recuperação)
  */
 export const atualizarSenha = async (novaSenha: string) => {
   console.log('authService: Iniciando updateUser...');

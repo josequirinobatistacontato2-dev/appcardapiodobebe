@@ -218,7 +218,6 @@ export const useApp = () => {
 
 import { Login } from './Login';
 import NovaSenha from './NovaSenha';
-import ResetSenha from './ResetSenha';
 import EsqueciSenha from './EsqueciSenha';
 
 // ==========================================
@@ -1887,7 +1886,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
           if (session?.user) {
             // Evitar sincronização durante o fluxo de redefinição de senha
-            if (event === 'USER_UPDATED' && window.location.pathname.includes('/nova-senha')) {
+            // Não queremos que o usuário seja "logado" globalmente na aplicação
+            // enquanto estiver apenas redefinindo a senha.
+            if (window.location.pathname.includes('/nova-senha')) {
+              console.log('App: Sincronização ignorada pois estamos em /nova-senha');
               return;
             }
 
@@ -1923,7 +1925,10 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         // 3. Verificação inicial de sessão (caso o listener demore)
         const { data: { session } } = await supabase.auth.getSession();
         if (isMounted && session?.user && !user) {
-          await syncUser(session.user.email!);
+          // Não sincronizar se estivermos redefinindo a senha
+          if (!window.location.pathname.includes('/nova-senha')) {
+            await syncUser(session.user.email!);
+          }
         }
       } catch (error) {
         console.error("Erro no initApp:", error);
@@ -2836,7 +2841,6 @@ function MainRoutes() {
         )
       } />
       <Route path="/nova-senha" element={<NovaSenha />} />
-      <Route path="/reset" element={<ResetSenha />} />
       <Route path="/esqueci-senha" element={<EsqueciSenha />} />
       <Route path="/login" element={<Login />} />
       <Route path="/dashboard" element={<ProtectedRoute><Layout><DashboardView /></Layout></ProtectedRoute>} />
