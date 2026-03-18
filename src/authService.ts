@@ -81,27 +81,21 @@ export const solicitarResetSenha = async (email: string) => {
   console.log('authService: Iniciando solicitarResetSenha para:', emailLimpo);
   
   try {
-    // Tentamos primeiro o endpoint unificado que lida com o fluxo Supabase
-    const response = await fetch('/api/reset-password', {
+    const baseUrl = window.location.origin;
+    // Tentamos o endpoint unificado
+    const response = await fetch(`${baseUrl}/api/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: emailLimpo })
+      body: JSON.stringify({ email: emailLimpo }),
+      signal: AbortSignal.timeout(15000) 
+    }).catch(err => {
+      console.error('authService: Erro de rede em /api/reset-password:', err);
+      throw new Error('Erro de conexão com o servidor. Verifique sua internet.');
     });
 
     if (!response.ok) {
-      // Fallback para o endpoint do servidor Express se o primeiro falhar
-      console.log('authService: Fallback para /api/auth/request-reset');
-      const fallbackResponse = await fetch('/api/auth/request-reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: emailLimpo })
-      });
-      
-      if (!fallbackResponse.ok) {
-        const errorData = await fallbackResponse.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Erro ao solicitar recuperação de senha.');
-      }
-      return await fallbackResponse.json();
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Erro ${response.status}: Falha ao solicitar recuperação.`);
     }
 
     return await response.json();
@@ -118,27 +112,20 @@ export const resetarSenhaComToken = async (token: string, novaSenha: string) => 
   console.log('authService: Iniciando resetarSenhaComToken...');
   
   try {
-    // Tenta primeiro o endpoint unificado
-    const response = await fetch('/api/reset-password', {
+    const baseUrl = window.location.origin;
+    const response = await fetch(`${baseUrl}/api/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, novaSenha })
+      body: JSON.stringify({ token, novaSenha }),
+      signal: AbortSignal.timeout(15000)
+    }).catch(err => {
+      console.error('authService: Erro de rede em /api/reset-password:', err);
+      throw new Error('Erro de conexão com o servidor. Verifique sua internet.');
     });
 
     if (!response.ok) {
-      // Fallback para o endpoint do servidor Express
-      console.log('authService: Fallback para /api/auth/reset-password');
-      const fallbackResponse = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, novaSenha })
-      });
-
-      if (!fallbackResponse.ok) {
-        const errorData = await fallbackResponse.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Erro ao resetar senha.');
-      }
-      return await fallbackResponse.json();
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Erro ${response.status}: Falha ao resetar senha.`);
     }
 
     return await response.json();

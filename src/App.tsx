@@ -1831,41 +1831,30 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   };
 
   useEffect(() => {
-    let subscription: { unsubscribe: () => void } | null = null;
+    let isMounted = true;
+    let authSubscription: any = null;
 
-    const initAuth = async () => {
-      console.log('App: Iniciando initAuth...');
+    const initApp = async () => {
+      console.log('App: Iniciando initApp...');
+      setLoading(true);
       setLoadingUser(true);
       setLoadingSales(true);
-      setLoading(true);
-      
-      // Safety timeout to prevent infinite loading
-      const timeoutId = setTimeout(() => {
-        if (loading) {
-          console.warn('App: initAuth demorando demais, forçando fim do loading...');
-          setLoading(false);
-          setLoadingUser(false);
-          setLoadingSales(false);
-        }
-      }, 15000);
 
       try {
-        setLoading(true);
+        // 1. Carregar dados essenciais (produtos, tema, etc)
+        await loadData();
 
+        // 2. Verificar fluxo de recuperação de senha
         const isRecovery = location.hash.includes('type=recovery') || 
                           location.hash.includes('access_token=') ||
                           location.hash.includes('recovery_token=') ||
                           location.search.includes('code=') ||
                           (location.hash.includes('code='));
         
-        console.log('App: isRecovery:', isRecovery, 'Path:', location.pathname);
-        
         if (isRecovery && !location.pathname.includes('/nova-senha')) {
           console.log('App: Redirecionando para recuperação...');
-          
           let targetSearch = location.search;
           let targetHash = location.hash;
-
           if (location.hash.includes('code=')) {
             const params = new URLSearchParams(location.hash.split('?')[1] || location.hash.substring(1));
             const code = params.get('code');
@@ -1874,109 +1863,106 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               targetHash = '';
             }
           }
-
-          const targetPath = `/nova-senha${targetSearch}${targetHash}`;
-          console.log('App: Redirecionando para:', targetPath);
-          navigate(targetPath, { replace: true });
+          navigate(`/nova-senha${targetSearch}${targetHash}`, { replace: true });
           setLoading(false);
           setLoadingUser(false);
           setLoadingSales(false);
           return;
         }
 
-        await loadData();
-        
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-        console.log('App: getUser result:', authUser?.email, 'Error:', authError);
-        
-        if (authUser) {
-          console.log('App: Usuário autenticado encontrado, sincronizando...');
-          setLoadingUser(false);
-          await syncUser(authUser.email!);
-        } else {
-          console.log('App: Nenhum usuário autenticado no getUser, verificando localStorage...');
-          setLoadingUser(false);
-          setLoadingSales(false);
-          const saved = localStorage.getItem('bs_auth_user');
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved);
-              setUser(parsed);
-            } catch (e) {
-              localStorage.removeItem('bs_auth_user');
-            }
+        // 3. Configurar o listener de autenticação
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+          if (!isMounted) return;
+          
+          console.log('App: Auth event:', event, 'Session:', session?.user?.email);
+
+          if (event === 'SIGNED_OUT') {
+            setUser(null);
+            localStorage.removeItem('bs_auth_user');
+            setLoadingUser(false);
+            setLoadingSales(false);
+            setLoading(false);
+            return;
           }
+
+          if (session?.user) {
+            // Evitar sincronização durante o fluxo de redefinição de senha
+            if (event === 'USER_UPDATED' && window.location.pathname.includes('/nova-senha')) {
+              return;
+            }
+
+            try {
+              if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+                setLoading(true);
+                setLoadingUser(true);
+                setLoadingSales(true);
+              }
+              
+              setLoadingUser(false);
+              await syncUser(session.user.email!);
+            } catch (err: any) {
+              console.error('App: Erro ao sincronizar usuário:', err.message);
+            } finally {
+              if (isMounted) {
+                setLoading(false);
+                setLoadingUser(false);
+                setLoadingSales(false);
+              }
+            }
+          } else {
+            setUser(null);
+            localStorage.removeItem('bs_auth_user');
+            setLoadingUser(false);
+            setLoadingSales(false);
+            setLoading(false);
+          }
+        });
+
+        authSubscription = subscription;
+
+        // 3. Verificação inicial de sessão (caso o listener demore)
+        const { data: { session } } = await supabase.auth.getSession();
+        if (isMounted && session?.user && !user) {
+          await syncUser(session.user.email!);
         }
       } catch (error) {
-        console.error("Erro no initAuth:", error);
+        console.error("Erro no initApp:", error);
       } finally {
-        clearTimeout(timeoutId);
-        setLoading(false);
-        setLoadingUser(false);
-        setLoadingSales(false);
+        if (isMounted) {
+          setLoading(false);
+          setLoadingUser(false);
+          setLoadingSales(false);
+        }
       }
     };
 
-    initAuth();
-  }, [theme.adminEmail]); // Re-init only if adminEmail changes
-
-  useEffect(() => {
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('App: Auth event:', event, 'Session:', session?.user?.email);
-
-      if (event === 'SIGNED_OUT') {
-        console.log('App: Evento SIGNED_OUT detectado');
-        setUser(null);
-        localStorage.removeItem('bs_auth_user');
-        return;
-      }
-
-      if (session?.user) {
-        // Evitar sincronização durante o fluxo de redefinição de senha para não causar loops ou erros 400
-        if (event === 'USER_UPDATED' && window.location.pathname.includes('/nova-senha')) {
-          console.log('App: USER_UPDATED ignorado em /nova-senha para evitar conflitos');
-          return;
-        }
-
-        console.log('App: Usuário detectado na sessão, iniciando sincronização');
-        try {
-          // Se for um evento de login ou mudança de estado, garantimos o loading
-          if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-            setLoading(true);
-            setLoadingUser(true);
-            setLoadingSales(true);
-          }
-          
-          setLoadingUser(false);
-          await syncUser(session.user.email!);
-          console.log('App: Sincronização concluída para:', session.user.email);
-        } catch (err: any) {
-          console.error('App: Erro ao sincronizar usuário:', err.message);
-        } finally {
-          setLoading(false);
-          setLoadingUser(false);
-          setLoadingSales(false);
-        }
-      } else {
-        console.log('App: Nenhum usuário na sessão');
-        setUser(null);
-        localStorage.removeItem('bs_auth_user');
-      }
-    });
+    initApp();
 
     return () => {
-      authListener.subscription.unsubscribe();
+      isMounted = false;
+      if (authSubscription) authSubscription.unsubscribe();
     };
   }, [theme.adminEmail]);
 
-  const syncUser = async (email: string) => {
+  const syncingEmailRef = useRef<string | null>(null);
+
+  const syncUser = async (email: string, retryCount = 0) => {
     const emailLimpo = email.trim().toLowerCase();
-    console.log("USER EMAIL:", emailLimpo);
+    
+    // Evitar chamadas duplicadas para o mesmo e-mail (exceto em caso de retry)
+    if (syncingEmailRef.current === emailLimpo && retryCount === 0) {
+      console.log("App: Sincronização já em andamento para:", emailLimpo);
+      return;
+    }
+    
+    syncingEmailRef.current = emailLimpo;
+    console.log(`LOGIN SUCCESS (Attempt ${retryCount + 1}):`, emailLimpo);
     
     // Check if it's admin
     if (emailLimpo === theme.adminEmail.toLowerCase()) {
       setUser({ id: 'admin', name: 'Master Admin', email, role: 'admin', status: 'active', accessType: 'lifetime', startDate: new Date().toISOString(), masterPurchaseDate: undefined, purchasedProducts: [] });
       setLoadingSales(false);
+      syncingEmailRef.current = null;
       return;
     }
 
@@ -1984,29 +1970,44 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       setLoadingSales(true);
       setLoading(true);
       
-      // 1. Consulta principal: e-mail e status ativo (conforme solicitado)
-      const { data: sales, error: salesError } = await supabase
+      // Timeout de 15 segundos para a consulta de vendas
+      const salesPromise = supabase
         .from('sales')
         .select('*')
         .eq('email', emailLimpo)
         .in('status', ['ativo', 'approved', 'pago', 'concluido', 'complete']);
+
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT_SALES')), 15000)
+      );
+
+      console.time(`sales-query-${emailLimpo}`);
+      const result = await Promise.race([salesPromise, timeoutPromise]) as any;
+      console.timeEnd(`sales-query-${emailLimpo}`);
+      
+      const sales = result.data;
+      const salesError = result.error;
         
-      console.log("SALES FOUND:", sales);
+      console.log("SALES QUERY RESULT:", sales);
 
       if (salesError) {
         console.error('App: Erro na consulta de vendas:', salesError.message);
         // Fallback para 'e-mail' se 'email' falhar
-        if (salesError.message.includes('column "email" does not exist')) {
-          const { data: fallbackData } = await supabase
+        if (salesError.message?.includes('column "email" does not exist')) {
+          const { data: fallbackData, error: fallbackError } = await supabase
             .from('sales')
             .select('*')
             .eq('e-mail', emailLimpo)
             .in('status', ['ativo', 'approved', 'pago', 'concluido', 'complete']);
           
+          if (fallbackError) throw fallbackError;
+          
           if (fallbackData && fallbackData.length > 0) {
             processSales(fallbackData);
             return;
           }
+        } else {
+          throw salesError;
         }
       }
 
@@ -2026,9 +2027,20 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       }
     } catch (err: any) {
       console.error('App: Erro fatal no syncUser:', err);
+      if (err.message === 'TIMEOUT_SALES') {
+        if (retryCount < 1) {
+          console.log('App: Timeout detectado, tentando novamente...');
+          syncingEmailRef.current = null;
+          return syncUser(email, retryCount + 1);
+        }
+        notify('A verificação de acesso demorou demais. Tente novamente ou entre em contato com o suporte.', 'error');
+      } else {
+        notify('Erro ao sincronizar dados. Tente novamente.', 'error');
+      }
     } finally {
       setLoadingSales(false);
       setLoading(false);
+      syncingEmailRef.current = null;
     }
   };
 

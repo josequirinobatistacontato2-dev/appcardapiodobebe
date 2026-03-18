@@ -61,10 +61,10 @@ export const Login = () => {
     try {
       console.log('Login: Iniciando signIn para:', eTrim);
       
-      // Timeout de 30 segundos para o login (aumentado de 15s para evitar falsos positivos em conexões lentas)
+      // Timeout de 8 segundos para o login (conforme solicitado)
       const loginPromise = signIn(eTrim, password);
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Tempo de resposta excedido. Verifique sua conexão ou tente novamente em alguns instantes.')), 30000)
+        setTimeout(() => reject(new Error('Tempo de resposta excedido. Verifique sua conexão ou tente novamente em alguns instantes.')), 8000)
       );
 
       console.time('login-timer');

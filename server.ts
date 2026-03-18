@@ -58,7 +58,112 @@ async function startServer() {
   const resendKey = process.env.RESEND_API_KEY || 're_EPhXPhdr_C2o2bsnSa2CWTNsfQ7wJT3A2';
   const resend = resendKey ? new Resend(resendKey) : null;
 
-  // API: Solicitar Reset de Senha
+  // API: Solicitar Reset de Senha (Unificado)
+  app.post("/api/reset-password", async (req, res) => {
+    console.log(`[SERVER] Recebida requisição em /api/reset-password: ${req.method} ${JSON.stringify(req.body)}`);
+    const { email, token, novaSenha } = req.body;
+
+    // Fluxo 1: Resetar senha com token
+    if (token && novaSenha) {
+      try {
+        console.log(`[AUTH] Tentando resetar senha com token: ${token.substring(0, 8)}...`);
+        
+        // 1. Verificar token
+        const { data: resetData, error: fetchError } = await supabaseAdmin
+          .from("password_resets")
+          .select("*")
+          .eq("token", token)
+          .single();
+
+        if (fetchError || !resetData) {
+          return res.status(400).json({ error: "Token inválido ou expirado." });
+        }
+
+        const reset = resetData as any;
+        const isExpired = new Date() > new Date(reset.expires_at);
+        if (isExpired) {
+          await supabaseAdmin.from("password_resets").delete().eq("token", token);
+          return res.status(400).json({ error: "Token expirado." });
+        }
+
+        // 2. Buscar usuário pelo e-mail
+        const { data: userData, error: userError } = await supabaseAdmin.auth.admin.listUsers();
+        if (userError) throw userError;
+
+        const user = userData.users.find((u: any) => u.email?.toLowerCase() === reset.email.toLowerCase());
+        if (!user) {
+          return res.status(404).json({ error: "Usuário não encontrado." });
+        }
+
+        // 3. Atualizar senha via Admin API
+        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+          password: novaSenha
+        });
+
+        if (updateError) throw updateError;
+
+        // 4. Deletar token usado
+        await supabaseAdmin.from("password_resets").delete().eq("token", token);
+
+        return res.json({ success: true, message: "Senha atualizada com sucesso." });
+      } catch (error: any) {
+        console.error("Erro ao resetar senha com token:", error);
+        return res.status(500).json({ error: error.message });
+      }
+    }
+
+    // Fluxo 2: Solicitar reset por e-mail
+    if (email) {
+      const emailLimpo = email.trim().toLowerCase();
+      try {
+        console.log(`[AUTH] Solicitando reset para: ${emailLimpo}`);
+        
+        // 1. Gerar token
+        const token = crypto.randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 3600000); // 1 hora
+
+        // 2. Salvar na tabela password_resets
+        const { error: dbError } = await supabaseAdmin
+          .from("password_resets")
+          .insert([{ email: emailLimpo, token, expires_at: expiresAt.toISOString() }]);
+
+        if (dbError) throw dbError;
+
+        // 3. Enviar e-mail
+        const rawAppUrl = process.env.APP_URL || process.env.URL_DO_APLICATIVO || 'http://localhost:3000';
+        const appUrl = rawAppUrl.replace(/\/$/, '');
+        const resetLink = `${appUrl}/reset?token=${token}`;
+        
+        console.log(`[AUTH] Link de recuperação gerado: ${resetLink}`);
+
+        if (resend) {
+          await resend.emails.send({
+            from: "Cardápio do Bebê <noreply@appcardapiodobebe.com>",
+            to: emailLimpo,
+            subject: "Recuperação de Senha",
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2>Recuperação de Senha</h2>
+                <p>Olá! Você solicitou a recuperação de senha para sua conta no Cardápio do Bebê Saudável.</p>
+                <p>Clique no botão abaixo para definir uma nova senha. Este link expira em 1 hora.</p>
+                <a href="${resetLink}" style="display: inline-block; background: #000; color: #fff; padding: 12px 24px; border-radius: 99px; text-decoration: none; font-weight: bold; margin: 20px 0;">Definir Nova Senha</a>
+                <p>Se você não solicitou isso, ignore este e-mail.</p>
+              </div>
+            `
+          });
+        }
+
+        return res.json({ success: true, message: "E-mail enviado com sucesso." });
+      } catch (error: any) {
+        console.error("Erro ao solicitar reset:", error);
+        return res.status(500).json({ error: error.message });
+      }
+    }
+
+    return res.status(400).json({ error: "E-mail ou Token/Senha ausentes." });
+  });
+
+  // API: Solicitar Reset de Senha (Antigo, mantido para compatibilidade)
   app.post("/api/auth/request-reset", async (req, res) => {
     const { email } = req.body;
     const emailLimpo = email.trim().toLowerCase();
