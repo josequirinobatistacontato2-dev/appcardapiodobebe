@@ -1890,6 +1890,9 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             // enquanto estiver apenas redefinindo a senha.
             if (window.location.pathname.includes('/nova-senha')) {
               console.log('App: Sincronização ignorada pois estamos em /nova-senha');
+              setLoading(false);
+              setLoadingUser(false);
+              setLoadingSales(false);
               return;
             }
 
@@ -1923,12 +1926,24 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         authSubscription = subscription;
 
         // 3. Verificação inicial de sessão (caso o listener demore)
-        const { data: { session } } = await supabase.auth.getSession();
-        if (isMounted && session?.user && !user) {
-          // Não sincronizar se estivermos redefinindo a senha
-          if (!window.location.pathname.includes('/nova-senha')) {
-            await syncUser(session.user.email!);
+        // Timeout de 5 segundos para getSession
+        const getSessionPromise = supabase.auth.getSession();
+        const sessionTimeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('TIMEOUT_GET_SESSION')), 5000)
+        );
+
+        try {
+          const result = await Promise.race([getSessionPromise, sessionTimeoutPromise]) as any;
+          const session = result.data?.session;
+          
+          if (isMounted && session?.user && !user) {
+            // Não sincronizar se estivermos redefinindo a senha
+            if (!window.location.pathname.includes('/nova-senha')) {
+              await syncUser(session.user.email!);
+            }
           }
+        } catch (e) {
+          console.warn('App: getSession timeout or error, relying on onAuthStateChange', e);
         }
       } catch (error) {
         console.error("Erro no initApp:", error);
@@ -2240,16 +2255,30 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     addLog: async () => {},
     logout: async () => {
       console.log('App: Realizando logout...');
+      setLoading(true);
       try {
-        // Don't await this to avoid blocking the UI if it hangs
-        supabase.auth.signOut().catch(e => console.error('Logout error:', e));
+        // Timeout de 5 segundos para o signOut
+        const signOutPromise = supabase.auth.signOut();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('TIMEOUT_SIGNOUT')), 5000)
+        );
+
+        await Promise.race([signOutPromise, timeoutPromise]);
+        console.log('App: signOut concluído');
       } catch (e) {
         console.error('Logout error:', e);
+      } finally {
+        // Limpeza total e agressiva
+        setUser(null);
+        localStorage.clear(); // Limpa TUDO, incluindo tokens do Supabase
+        setLoading(false);
+        notify('Sessão encerrada com sucesso.', 'success');
+        
+        // Pequeno delay para garantir que os estados foram limpos antes do reload
+        setTimeout(() => {
+          window.location.href = "/";
+        }, 300);
       }
-      
-      notify('Sessão encerrada com sucesso.', 'success');
-      // Force navigation to home
-      window.location.href = "/";
     },
     loadSales,
     signIn: async (email: string, pass: string) => {
